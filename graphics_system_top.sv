@@ -1,10 +1,8 @@
 module graphics_system_top (
-    // FPGA fabric
     input  logic        clk50,
     input  logic        s1,
     output logic [7:0]  LED,
 
-    // HPS DDR3 — required, connects to HPS hard memory controller
     output wire [14:0]  HPS_DDR3_ADDR,
     output wire [2:0]   HPS_DDR3_BA,
     output wire         HPS_DDR3_CAS_N,
@@ -22,7 +20,6 @@ module graphics_system_top (
     input  wire         HPS_DDR3_RZQ,
     output wire         HPS_DDR3_WE_N,
 
-    // HPS IO — required for SD boot, SSH, UART debug, USB
     output wire         HPS_ENET_GTX_CLK,
     output wire         HPS_ENET_MDC,
     inout  wire         HPS_ENET_MDIO,
@@ -44,28 +41,59 @@ module graphics_system_top (
 );
 
     // ==========================================
-    // F2H SDRAM0 interface — tied off until GPU
-    // master module is instantiated here
+    // PIO signals
     // ==========================================
-    wire [28:0] f2h_sdram0_address;
-    wire        f2h_sdram0_read;
-    wire [63:0] f2h_sdram0_readdata;
-    wire        f2h_sdram0_readdatavalid;
-    wire        f2h_sdram0_waitrequest;
-    wire [7:0]  f2h_sdram0_burstcount;
+    logic [7:0]  gpu_control_internal;
+    logic [7:0]  gpu_status_internal;
+    logic [31:0] cmd_addr_internal;
+    logic [31:0] cmd_size_internal;
 
-    assign f2h_sdram0_address    = '0;
-    assign f2h_sdram0_read       = 1'b0;
-    assign f2h_sdram0_burstcount = 8'd1;
+    assign LED = gpu_control_internal;
 
+    // ==========================================
+    // F2H SDRAM0 wires
+    // ==========================================
+    logic [28:0] f2h_sdram0_address;
+    logic        f2h_sdram0_read;
+    logic [63:0] f2h_sdram0_readdata;
+    logic        f2h_sdram0_readdatavalid;
+    logic        f2h_sdram0_waitrequest;
+    logic [7:0]  f2h_sdram0_burstcount;
+
+    // ==========================================
+    // Test master
+    // ==========================================
+    logic test_done;
+    logic [7:0] test_result;
+
+    assign gpu_status_internal = {test_done, test_result[6:0]};
+
+    f2h_sdram_test_master test_master (
+        .clk               (clk50),
+        .reset_n           (s1),
+        .start             (gpu_control_internal[0]),
+        .read_addr         (cmd_addr_internal),
+        .avm_address       (f2h_sdram0_address),
+        .avm_read          (f2h_sdram0_read),
+        .avm_burstcount    (f2h_sdram0_burstcount),
+        .avm_readdata      (f2h_sdram0_readdata),
+        .avm_readdatavalid (f2h_sdram0_readdatavalid),
+        .avm_waitrequest   (f2h_sdram0_waitrequest),
+        .result            (test_result),
+        .done              (test_done)
+    );
+
+    // ==========================================
+    // Qsys system
+    // ==========================================
     graphics_system u0 (
         .clk50_clk                       (clk50),
         .clk_reset_reset_n               (s1),
 
-        .gpu_control_export_export       (LED),
-        .gpu_status_export_export        (8'b0),
-        .cmd_addr_export_export          (),   // unconnected until GPU core exists
-        .cmd_size_export_export          (),   // unconnected until GPU core exists
+        .gpu_control_export_export       (gpu_control_internal),
+        .gpu_status_export_export        (gpu_status_internal),
+        .cmd_addr_export_export          (cmd_addr_internal),
+        .cmd_size_export_export          (cmd_size_internal),
 
         .f2h_sdram0_address              (f2h_sdram0_address),
         .f2h_sdram0_read                 (f2h_sdram0_read),
