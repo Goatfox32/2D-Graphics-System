@@ -6,7 +6,6 @@ incremental_db/
 *.qws
 output_files/
 simulation/
-software/
 obj_dir/
 waveform.vcd
 wavestate.*
