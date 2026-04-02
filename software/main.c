@@ -8,7 +8,9 @@ int main() {
     init_comm();
 
     // Example usage: send a command to the GPU
-    send_command(0xAA, 0x12345678);
+    draw_triangle(30, 20, 255, 0, 0,
+                  20, 40, 0, 255, 0,
+                  10, 60, 0, 0, 255);
 
     // Read status back from the GPU
     uint8_t status = read_status();

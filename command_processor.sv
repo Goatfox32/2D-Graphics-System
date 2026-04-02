@@ -36,7 +36,12 @@ module command_processor (
     logic [191:0] next_vertex_data;
     logic         next_vertex_valid;
 
-    wire start = control[0];
+    logic start_r;
+    always_ff @(posedge clk) begin
+        if (!reset_n) start_r <= 1'b0;
+        else          start_r <= control[0];
+    end
+    wire start_pulse = control[0] & ~start_r;
 
     always_ff @(posedge clk) begin
         if (!reset_n) begin
@@ -90,7 +95,7 @@ module command_processor (
         case (state)
             IDLE: begin
                 next_busy = 1'b0;
-                if (start) begin
+                if (start_pulse) begin
                     next_busy = 1'b1;
                     next_size_error = 1'b0;
 
@@ -173,9 +178,9 @@ module command_processor (
     assign status[1] = size_error; // SIZE_ERROR
     assign status[2] = vertex_valid; // VERTEX_VALID
     assign status[3] = (state == WAIT_REQ) & avm_waitrequest;  // stuck indicator
-    assign status[4] = (vertex_data[7:0]   == 8'hAA);  // byte 0 of vertex 2
-    assign status[5] = (vertex_data[71:64] == 8'hBB);  // byte 0 of vertex 1
-    assign status[6] = (vertex_data[135:128] == 8'hCC); // byte 0 of vertex 0
+    assign status[4] = (vertex_data[7:0]   == 8'd10);  // byte 0 of vertex 2
+    assign status[5] = (vertex_data[71:64] == 8'd20);  // byte 0 of vertex 1
+    assign status[6] = (vertex_data[135:128] == 8'd30); // byte 0 of vertex 0
     assign status[7] = (status[4] & status[5] & status[6]); // all correct
 
 endmodule

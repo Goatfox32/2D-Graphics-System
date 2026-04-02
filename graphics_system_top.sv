@@ -66,13 +66,6 @@ module graphics_system_top (
     logic vertex_valid;
     logic [191:0] vertex_data;
 
-    logic start_r;
-    always_ff @(posedge clk50 or negedge s1)
-        if (!s1) start_r <= 1'b0;
-        else     start_r <= gpu_control_internal[0];
-
-    wire start_pulse = gpu_control_internal[0] & ~start_r;
-
     assign LED = gpu_status_internal;
 
     command_processor cmd_proc (
@@ -82,7 +75,7 @@ module graphics_system_top (
         .read_addr      (cmd_addr_internal),
         .read_size      (cmd_size_internal),
         .status         (gpu_status_internal),
-        .control        (gpu_control_internal),
+        .control        (gpu_control_internal), // Edge detection is done inside the command processor !!!
 
         .avm_address    (f2h_sdram0_address),
         .avm_read       (f2h_sdram0_read),
