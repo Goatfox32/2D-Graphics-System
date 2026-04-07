@@ -1,3 +1,10 @@
+// Braden Vanderwoerd
+// 2026-04-06
+// Command Executer Module
+// This module executes commands read by the Command Reader, interfacing with the rasterizer and vertex processor as needed.
+// It reads commands and data from the FIFOs and sends appropriate signals to the rasterizer and vertex processor.
+
+`default_nettype none
 
 module command_executer (
     input  logic         clk,
@@ -14,8 +21,8 @@ module command_executer (
     input  logic         rast_ready,
     output logic         vertex_valid,
     output logic [191:0] vertex_data,
-    output logic         clear,
-    output logic [63:0]  set_pixel
+    output logic         rast_clear,
+    output logic [63:0]  rast_set_pixel
 );
 
     localparam NOP = 8'h00,
@@ -23,14 +30,11 @@ module command_executer (
                DRAW_PIXEL = 8'h02,
                DRAW_TRIANGLE = 8'h03;
 
-    logic next_command_buffer_en;
-    logic next_data_buffer_en;
-
     logic next_vertex_valid;
     logic [191:0] next_vertex_data;
 
-    logic next_clear;
-    logic [63:0] next_set_pixel;
+    logic next_rast_clear;
+    logic [63:0] next_rast_set_pixel;
 
     logic [2:0] vertices_remaining, next_vertices_remaining;
 
@@ -38,24 +42,20 @@ module command_executer (
 
     always_ff @(posedge clk) begin
         if (!reset_n) begin
-            command_buffer_en <= 1'b0;
-            data_buffer_en    <= 1'b0;
             vertex_valid      <= 1'b0;
             vertex_data       <= '0;
-            clear             <= 1'b0;
-            set_pixel         <= '0;
+            rast_clear             <= 1'b0;
+            rast_set_pixel         <= '0;
 
             vertices_remaining <= 3'b0;
 
             state <= IDLE;
         end
         else begin
-            command_buffer_en <= next_command_buffer_en;
-            data_buffer_en    <= next_data_buffer_en;
             vertex_valid      <= next_vertex_valid;
             vertex_data       <= next_vertex_data;
-            clear             <= next_clear;
-            set_pixel         <= next_set_pixel;
+            rast_clear        <= next_rast_clear;
+            rast_set_pixel         <= next_rast_set_pixel;
 
             vertices_remaining <= next_vertices_remaining;
 
@@ -64,16 +64,16 @@ module command_executer (
     end
 
     always_comb begin
-        next_command_buffer_en = 1'b0;
-        next_data_buffer_en    = 1'b0;
-        next_vertex_valid      = 1'b0;
-        next_vertex_data       = vertex_data;
-        next_clear             = 1'b0;
-        next_set_pixel         = set_pixel;
+        command_buffer_en = 1'b0;
+        data_buffer_en    = 1'b0;
+        next_vertex_valid       = 1'b0;
+        next_vertex_data        = vertex_data;
+        next_rast_clear         = 1'b0;
+        next_rast_set_pixel     = rast_set_pixel;
 
-        next_vertices_remaining   = vertices_remaining;
+        next_vertices_remaining = vertices_remaining;
 
-        next_state             = state;
+        next_state              = state;
 
         case (state)
             IDLE: begin
@@ -83,7 +83,7 @@ module command_executer (
             end
 
             READ_COMMAND: begin
-                next_command_buffer_en = 1'b1;
+                command_buffer_en = 1'b1;
                 case (command_buffer_data[7:0])
                     NOP: begin
                         next_state = IDLE;
@@ -110,7 +110,7 @@ module command_executer (
 
             CLEAR_COMMAND: begin
                 if (rast_ready) begin
-                    next_clear = 1'b1;
+                    next_rast_clear = 1'b1;
                     next_state = IDLE;
                 end
             end
@@ -123,11 +123,13 @@ module command_executer (
                     end
                 end
                 else if (!data_buffer_empty) begin
-                    next_data_buffer_en = 1'b1;
-                    next_vertex_data[(vertices_remaining-1)*64 +: 64] = data_buffer_data;
+                    data_buffer_en = 1'b1;
+                    next_vertex_data[(3-vertices_remaining)*64 +: 64] = data_buffer_data;
                     next_vertices_remaining = vertices_remaining - 1;
                 end
             end
+
+            default: next_state = IDLE;
         endcase
 
     end

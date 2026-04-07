@@ -1,9 +1,10 @@
 // Braden Vanderwoerd
-// 2026-04-03
+// 2026-04-06
 // Command Reader Module
 // This module reads commands from the SDRAM and processes them, writing results to the command and data FIFOs.
-// If busy is high, the module will not accept new commands and will set the status bit accordingly.
+// Note: if busy is high, the module will not accept new commands and will set the status bit accordingly.
 
+`default_nettype none
 module command_reader (
     input  logic         clk,
     input  logic         reset_n,
@@ -27,7 +28,9 @@ module command_reader (
     input  logic         data_buffer_full,
     input  logic [4:0]   data_buffer_count,
     output logic         data_buffer_en,
-    output logic [63:0]  data_buffer_data 
+    output logic [63:0]  data_buffer_data,
+
+    output logic start_pulse
 );
 
     localparam NOP = 8'h00,
@@ -60,7 +63,7 @@ module command_reader (
         if (!reset_n) start_r <= 1'b0;
         else          start_r <= control[0]; // Control bit 0 triggers start
     end
-    wire start_pulse = control[0] & ~start_r;
+    assign start_pulse = control[0] & ~start_r;
 
     // --- Registered signals
     always_ff @(posedge clk) begin
@@ -211,8 +214,8 @@ module command_reader (
     // Use these for debugging
     assign status[0] = busy; // READY/BUSY
     assign status[1] = size_error; // SIZE_ERROR
-    assign status[2] = 1'b0;
-    assign status[3] = (state == WAIT_REQ) & avm_waitrequest;  // stuck indicator
+    assign status[2] = control[0];
+    assign status[3] = (state == WAIT_REQ) | avm_waitrequest;  // stuck indicator
     assign status[7:4] = '0;
 
 endmodule

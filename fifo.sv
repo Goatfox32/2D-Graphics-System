@@ -1,5 +1,8 @@
 // Ai-Generated
+// 2026-04-06
 // Simple FIFO implementation in SystemVerilog
+
+`default_nettype none
 
 module fifo (
     input  logic         clk,
@@ -22,12 +25,10 @@ module fifo (
             head <= 4'b0000;
             tail <= 4'b0000;
             count <= 5'b00000;
-            data_out <= 64'b0;
         end else begin
             if (write_en && !full && read_en && !empty) begin
                 fifo_mem[tail] <= data_in;
                 tail <= tail + 1;
-                data_out <= fifo_mem[head];
                 head <= head + 1;
                 // Count unchanged
             end else if (write_en && !full) begin

@@ -1,36 +1,27 @@
-#include "Vcommand_reader.h"
+#include "Vcommand_pipeline.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
 
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <cstdint>
 #include <vector>
-#include <string>
 
 // ── Globals ──────────────────────────────────────────────────────────────────
 
 static vluint64_t sim_time = 0;
-static Vcommand_reader *dut;
+static Vcommand_pipeline *dut;
 static VerilatedVcdC *tfp;
 
 static int tests_passed = 0;
 static int tests_failed = 0;
 
 // ── Avalon-MM slave model ────────────────────────────────────────────────────
-//
-// Phases:
-//   S_IDLE  – waiting for avm_read
-//   S_WAIT  – holding waitrequest high (configurable duration)
-//   S_GAP   – one cycle with waitrequest=0, no data yet.
-//             This is critical: the DUT needs one posedge to see
-//             !waitrequest and transition from WAIT_REQ to READ_COMMAND
-//             *before* we start asserting readdatavalid.
-//   S_DATA  – delivering beats via readdatavalid
+// Identical to the command_reader testbench slave.
+// S_GAP ensures 1-cycle separation between waitrequest drop and first data.
 
 struct Beat {
     uint64_t data;
-    int      gap;        // idle cycles *before* this beat's valid
+    int      gap;
 };
 
 enum SlaveState { S_IDLE, S_WAIT, S_GAP, S_DATA };
@@ -53,20 +44,18 @@ static void slave_reset() {
     dut->avm_readdata      = 0;
 }
 
-// Called once per tick, between negedge eval and posedge eval.
 static void slave_tick() {
     dut->avm_readdatavalid = 0;
     dut->avm_readdata      = 0;
     dut->avm_waitrequest   = 0;
 
     switch (slave_state) {
-
     case S_IDLE:
         if (dut->avm_read) {
             slave_beat_idx = 0;
             if (slave_wait_cycles > 0) {
                 dut->avm_waitrequest = 1;
-                slave_wait_ctr = slave_wait_cycles - 1;  // this call counts as one
+                slave_wait_ctr = slave_wait_cycles - 1;
                 slave_state = (slave_wait_ctr == 0) ? S_GAP : S_WAIT;
             } else {
                 slave_state = S_GAP;
@@ -82,9 +71,6 @@ static void slave_tick() {
         break;
 
     case S_GAP:
-        // waitrequest=0 (default), no data.
-        // DUT sees !waitrequest this posedge → transitions to READ_COMMAND.
-        // Next cycle we start delivering data.
         slave_gap_ctr = (!slave_beats.empty()) ? slave_beats[0].gap : 0;
         slave_state = S_DATA;
         break;
@@ -112,63 +98,100 @@ static void slave_tick() {
 // ── Clock / utility ─────────────────────────────────────────────────────────
 
 static void tick() {
-    // Negedge
     dut->clk = 0;
     dut->eval();
     tfp->dump(sim_time++);
 
-    // Drive slave model between edges
     slave_tick();
 
-    // Posedge
     dut->clk = 1;
     dut->eval();
     tfp->dump(sim_time++);
 }
 
 static void reset() {
-    dut->reset_n = 0;
-    dut->control = 0;
-    dut->read_addr = 0;
-    dut->read_size = 0;
-    dut->command_buffer_full = 0;
-    dut->data_buffer_full = 0;
-    dut->data_buffer_count = 0;
+    dut->reset_n    = 0;
+    dut->control    = 0;
+    dut->read_addr  = 0;
+    dut->read_size  = 0;
+    dut->rast_ready = 1;
     slave_reset();
     for (int i = 0; i < 4; i++) tick();
     dut->reset_n = 1;
     tick();
 }
 
-// Raise control[0] for one cycle then lower it.
 static void start_pulse() {
     dut->control = 0x01;
     tick();
     dut->control = 0x00;
 }
 
+// Fire a start pulse and configure the SDRAM slave in one call.
+static void issue_command(uint32_t addr, uint32_t size,
+                          std::vector<Beat> beats, int wait = 1) {
+    slave_beats       = beats;
+    slave_wait_cycles = wait;
+    dut->read_addr    = addr;
+    dut->read_size    = size;
+    start_pulse();
+}
+
 // ── Capture helpers ─────────────────────────────────────────────────────────
 
-struct FifoCapture {
-    std::vector<uint64_t> cmd;
-    std::vector<uint64_t> data;
+struct PipeCapture {
+    int clear_pulses;
+    int vertex_valid_pulses;
+    struct VertexBundle {
+        uint64_t v[3];
+    };
+    std::vector<VertexBundle> vertices;
 };
 
-// Run cycles, capturing FIFO writes, until DUT is no longer busy or timeout.
-static FifoCapture run_and_capture(int max_cycles = 200) {
-    FifoCapture cap;
+// Wait for the full pipeline to settle:
+//   reader not busy, both FIFOs empty, executer idle.
+static PipeCapture run_pipeline(int max_cycles = 500) {
+    PipeCapture cap = {};
     for (int i = 0; i < max_cycles; i++) {
         tick();
 
-        if (dut->command_buffer_en)
-            cap.cmd.push_back(dut->command_buffer_data);
-        if (dut->data_buffer_en)
-            cap.data.push_back(dut->data_buffer_data);
+        if (dut->clear)
+            cap.clear_pulses++;
 
-        if (!(dut->status & 0x01))
+        if (dut->vertex_valid) {
+            cap.vertex_valid_pulses++;
+            PipeCapture::VertexBundle vb;
+            const auto *w = dut->vertex_data.data();
+            vb.v[0] = (uint64_t)w[0] | ((uint64_t)w[1] << 32);
+            vb.v[1] = (uint64_t)w[2] | ((uint64_t)w[3] << 32);
+            vb.v[2] = (uint64_t)w[4] | ((uint64_t)w[5] << 32);
+            cap.vertices.push_back(vb);
+        }
+
+        // Pipeline settled: reader idle, FIFOs empty, no output pulses
+        bool reader_idle = !(dut->status & 0x01);
+        bool fifos_empty = (dut->cmd_fifo_count == 0) && (dut->data_fifo_count == 0);
+        bool exec_quiet  = !dut->vertex_valid && !dut->clear;
+
+        if (reader_idle && fifos_empty && exec_quiet && i > 5) {
+            // A few extra cycles to confirm it's truly settled
+            for (int j = 0; j < 3; j++) {
+                tick();
+                if (dut->clear) cap.clear_pulses++;
+                if (dut->vertex_valid) {
+                    cap.vertex_valid_pulses++;
+                    PipeCapture::VertexBundle vb;
+                    const auto *w = dut->vertex_data.data();
+                    vb.v[0] = (uint64_t)w[0] | ((uint64_t)w[1] << 32);
+                    vb.v[1] = (uint64_t)w[2] | ((uint64_t)w[3] << 32);
+                    vb.v[2] = (uint64_t)w[4] | ((uint64_t)w[5] << 32);
+                    cap.vertices.push_back(vb);
+                }
+            }
             return cap;
+        }
     }
-    printf("  [WARN] timed out waiting for idle\n");
+    printf("  [WARN] pipeline timed out\n");
     return cap;
 }
 
@@ -192,238 +215,208 @@ static void test_reset() {
     printf("\n--- test_reset ---\n");
     reset();
 
-    check(dut->avm_read == 0,               "avm_read deasserted");
-    check((dut->status & 0x01) == 0,         "not busy after reset");
-    check((dut->status & 0x02) == 0,         "no size error");
-    check(dut->command_buffer_en == 0, "cmd write_en low");
-    check(dut->data_buffer_en == 0,    "data write_en low");
+    check(dut->avm_read == 0,        "avm_read deasserted");
+    check((dut->status & 0x01) == 0,  "reader not busy");
+    check(dut->vertex_valid == 0,     "vertex_valid low");
+    check(dut->clear == 0,           "clear low");
+    check(dut->cmd_fifo_count == 0,   "cmd FIFO empty");
+    check(dut->data_fifo_count == 0,  "data FIFO empty");
 }
 
-// ── NOP (command 0x00, burst = 1) ────────────────────────────────────────────
+// ── NOP end-to-end ───────────────────────────────────────────────────────────
 
-static void test_nop() {
-    printf("\n--- test_nop ---\n");
+static void test_nop_e2e() {
+    printf("\n--- test_nop (end-to-end) ---\n");
     reset();
 
-    slave_beats = { {0x00, 0} };
-    slave_wait_cycles = 1;
+    issue_command(0x1000, 8, { {0x00, 0} });
+    PipeCapture cap = run_pipeline();
 
-    dut->read_addr = 0x1000;
-    dut->read_size = 8;
-    dut->data_buffer_count = 0;
-
-    start_pulse();
-    FifoCapture cap = run_and_capture();
-
-    check(cap.cmd.empty(),              "no command pushed for NOP");
-    check(cap.data.empty(),             "no data pushed for NOP");
-    check((dut->status & 0x01) == 0,    "returns to idle");
-    check((dut->status & 0x02) == 0,    "no size error");
+    check(cap.clear_pulses == 0,        "no clear");
+    check(cap.vertex_valid_pulses == 0, "no vertex_valid");
 }
 
-// ── CLEAR (command 0x01, burst = 1) ──────────────────────────────────────────
+// ── CLEAR end-to-end ─────────────────────────────────────────────────────────
 
-static void test_clear() {
-    printf("\n--- test_clear ---\n");
+static void test_clear_e2e() {
+    printf("\n--- test_clear (end-to-end) ---\n");
     reset();
 
-    slave_beats = { {0x01, 0} };
-    slave_wait_cycles = 2;
+    issue_command(0x2000, 8, { {0x01, 0} });
+    PipeCapture cap = run_pipeline();
 
-    dut->read_addr = 0x2000;
-    dut->read_size = 8;
-    dut->data_buffer_count = 0;
-
-    start_pulse();
-    FifoCapture cap = run_and_capture();
-
-    check(cap.cmd.size() == 1,                      "1 command pushed");
-    check(!cap.cmd.empty() && cap.cmd[0] == 0x01,   "command is CLEAR (0x01)");
-    check(cap.data.empty(),                          "no data for CLEAR");
-    check((dut->status & 0x01) == 0,                 "returns to idle");
+    check(cap.clear_pulses == 1,        "1 clear pulse");
+    check(cap.vertex_valid_pulses == 0, "no vertex_valid");
 }
 
-// ── CLEAR with wrong burst → size error ──────────────────────────────────────
+// ── DRAW_TRIANGLE end-to-end ─────────────────────────────────────────────────
 
-static void test_clear_size_error() {
-    printf("\n--- test_clear_size_error ---\n");
-    reset();
-
-    slave_beats = { {0x01, 0}, {0xDEAD, 0} };
-    slave_wait_cycles = 0;
-
-    dut->read_addr = 0x3000;
-    dut->read_size = 16;
-    dut->data_buffer_count = 0;
-
-    start_pulse();
-    FifoCapture cap = run_and_capture();
-
-    check(cap.cmd.empty(),              "no command pushed on size error");
-    check((dut->status & 0x02) != 0,    "size_error flag set");
-}
-
-// ── DRAW_TRIANGLE (command 0x03, burst = 4) ──────────────────────────────────
-
-static void test_draw_triangle() {
-    printf("\n--- test_draw_triangle ---\n");
+static void test_draw_triangle_e2e() {
+    printf("\n--- test_draw_triangle (end-to-end) ---\n");
     reset();
 
     uint64_t v0 = 0xAAAABBBBCCCC0001ULL;
     uint64_t v1 = 0xDDDDEEEEFFFF0002ULL;
     uint64_t v2 = 0x1111222233330003ULL;
 
-    slave_beats = {
-        {0x03, 0},
-        {v0,   0},
-        {v1,   0},
-        {v2,   0},
-    };
-    slave_wait_cycles = 1;
+    issue_command(0x3000, 32, {
+        {0x03, 0},   // command byte
+        {v0,   0},   // first data → slot [0]
+        {v1,   0},   // second     → slot [1]
+        {v2,   0},   // third      → slot [2]
+    });
 
-    dut->read_addr = 0x4000;
-    dut->read_size = 32;
-    dut->data_buffer_count = 0;
+    PipeCapture cap = run_pipeline();
 
-    start_pulse();
-    FifoCapture cap = run_and_capture();
+    check(cap.clear_pulses == 0,         "no clear");
+    check(cap.vertex_valid_pulses == 1,  "1 vertex_valid pulse");
 
-    check(cap.cmd.size() == 1,                      "1 command pushed");
-    check(!cap.cmd.empty() && cap.cmd[0] == 0x03,   "command is DRAW_TRIANGLE");
-    check(cap.data.size() == 3,                      "3 data beats pushed");
-
-    if (cap.data.size() == 3) {
-        check(cap.data[0] == v0,  "vertex 0 correct");
-        check(cap.data[1] == v1,  "vertex 1 correct");
-        check(cap.data[2] == v2,  "vertex 2 correct");
+    if (!cap.vertices.empty()) {
+        auto &vb = cap.vertices[0];
+        check(vb.v[0] == v0,  "slot [0] correct (bits 63:0)");
+        check(vb.v[1] == v1,  "slot [1] correct (bits 127:64)");
+        check(vb.v[2] == v2,  "slot [2] correct (bits 191:128)");
     }
-
-    check((dut->status & 0x01) == 0,    "returns to idle");
-    check((dut->status & 0x02) == 0,    "no size error");
 }
 
-// ── DRAW_TRIANGLE with inter-beat gaps ───────────────────────────────────────
+// ── DRAW_TRIANGLE with bus delays ────────────────────────────────────────────
 
-static void test_draw_triangle_gaps() {
-    printf("\n--- test_draw_triangle (gaps) ---\n");
+static void test_draw_triangle_slow_bus() {
+    printf("\n--- test_draw_triangle (slow bus) ---\n");
     reset();
 
-    uint64_t v0 = 0x0A;
-    uint64_t v1 = 0x0B;
-    uint64_t v2 = 0x0C;
+    uint64_t v0 = 0x0A, v1 = 0x0B, v2 = 0x0C;
 
-    slave_beats = {
+    issue_command(0x4000, 32, {
         {0x03, 0},
-        {v0,   3},
-        {v1,   1},
+        {v0,   3},   // 3 idle cycles before vertex 0
+        {v1,   2},
         {v2,   5},
-    };
-    slave_wait_cycles = 0;
+    }, /*wait=*/3);
 
-    dut->read_addr = 0x5000;
-    dut->read_size = 32;
-    dut->data_buffer_count = 0;
+    PipeCapture cap = run_pipeline();
 
-    start_pulse();
-    FifoCapture cap = run_and_capture(300);
-
-    check(cap.cmd.size() == 1 && cap.cmd[0] == 0x03,  "command correct");
-    check(cap.data.size() == 3,                         "3 data beats despite gaps");
-    if (cap.data.size() == 3) {
-        check(cap.data[0] == v0 && cap.data[1] == v1 && cap.data[2] == v2,
-              "data values correct through gaps");
+    check(cap.vertex_valid_pulses == 1,  "1 vertex_valid");
+    if (!cap.vertices.empty()) {
+        auto &vb = cap.vertices[0];
+        check(vb.v[0] == v0 && vb.v[1] == v1 && vb.v[2] == v2,
+              "vertices correct despite bus delays");
     }
 }
 
-// ── DRAW_TRIANGLE with wrong burst → size error ─────────────────────────────
+// ── DRAW_TRIANGLE with rast_ready stall ──────────────────────────────────────
 
-static void test_draw_triangle_size_error() {
-    printf("\n--- test_draw_triangle_size_error ---\n");
+static void test_draw_triangle_rast_stall() {
+    printf("\n--- test_draw_triangle (rast_ready stall) ---\n");
     reset();
+    dut->rast_ready = 0;
 
-    slave_beats = { {0x03, 0}, {0xBEEF, 0} };
-    slave_wait_cycles = 0;
+    uint64_t v0 = 0x10, v1 = 0x20, v2 = 0x30;
 
-    dut->read_addr = 0x6000;
-    dut->read_size = 16;
-    dut->data_buffer_count = 0;
+    issue_command(0x5000, 32, {
+        {0x03, 0}, {v0, 0}, {v1, 0}, {v2, 0},
+    });
 
-    start_pulse();
-    FifoCapture cap = run_and_capture();
+    // Let reader finish and executer consume data, but stall on rast_ready
+    for (int i = 0; i < 30; i++) tick();
+    check(dut->vertex_valid == 0,  "stalls without rast_ready");
 
-    check(cap.cmd.empty(),              "no command on size error");
-    check((dut->status & 0x02) != 0,    "size_error flag set");
+    dut->rast_ready = 1;
+    PipeCapture cap = run_pipeline();
+
+    check(cap.vertex_valid_pulses == 1,  "vertex_valid fires after rast_ready");
+    if (!cap.vertices.empty()) {
+        check(cap.vertices[0].v[0] == v0,  "data survived stall");
+    }
 }
 
-// ── Busy when data buffer nearly full ────────────────────────────────────────
+// ── CLEAR then DRAW_TRIANGLE sequentially ────────────────────────────────────
+// Two separate SDRAM reads, one after the other.
 
-static void test_busy_backpressure() {
-    printf("\n--- test_busy_backpressure ---\n");
-    reset();
-
-    dut->data_buffer_count = 14;
-    tick(); tick();
-    check((dut->status & 0x01) != 0,    "busy when buffer nearly full");
-
-    slave_beats = { {0x01, 0} };
-    dut->read_addr = 0x7000;
-    dut->read_size = 8;
-
-    start_pulse();
-    tick(); tick(); tick();
-
-    check(dut->avm_read == 0,           "no read issued when busy");
-}
-
-// ── Unrecognized command → drains and returns to idle ────────────────────────
-
-static void test_unrecognized_command() {
-    printf("\n--- test_unrecognized_command ---\n");
-    reset();
-
-    slave_beats = { {0xFF, 0} };
-    slave_wait_cycles = 0;
-
-    dut->read_addr = 0x8000;
-    dut->read_size = 8;
-    dut->data_buffer_count = 0;
-
-    start_pulse();
-    FifoCapture cap = run_and_capture();
-
-    check(cap.cmd.empty(),              "no command pushed for unknown cmd");
-    check(cap.data.empty(),             "no data pushed");
-    check((dut->status & 0x01) == 0,    "returns to idle");
-}
-
-// ── Back-to-back commands ────────────────────────────────────────────────────
-
-static void test_back_to_back() {
-    printf("\n--- test_back_to_back ---\n");
+static void test_clear_then_triangle() {
+    printf("\n--- test_clear_then_triangle ---\n");
     reset();
 
     // First: CLEAR
-    slave_beats = { {0x01, 0} };
-    slave_wait_cycles = 0;
-    dut->read_addr = 0xA000;
-    dut->read_size = 8;
-    dut->data_buffer_count = 0;
-
-    start_pulse();
-    FifoCapture cap1 = run_and_capture();
-    check(cap1.cmd.size() == 1 && cap1.cmd[0] == 0x01,  "first command: CLEAR");
+    issue_command(0x6000, 8, { {0x01, 0} });
+    PipeCapture cap1 = run_pipeline();
+    check(cap1.clear_pulses == 1,  "clear fires");
 
     // Second: DRAW_TRIANGLE
     uint64_t v0 = 0xAA, v1 = 0xBB, v2 = 0xCC;
-    slave_beats = { {0x03, 0}, {v0, 0}, {v1, 0}, {v2, 0} };
-    slave_wait_cycles = 1;
-    dut->read_addr = 0xB000;
-    dut->read_size = 32;
+    issue_command(0x7000, 32, {
+        {0x03, 0}, {v0, 0}, {v1, 0}, {v2, 0},
+    });
+    PipeCapture cap2 = run_pipeline();
 
-    start_pulse();
-    FifoCapture cap2 = run_and_capture();
-    check(cap2.cmd.size() == 1 && cap2.cmd[0] == 0x03,  "second command: DRAW_TRIANGLE");
-    check(cap2.data.size() == 3,                          "second command: 3 data beats");
+    check(cap2.vertex_valid_pulses == 1,  "triangle fires after clear");
+    if (!cap2.vertices.empty()) {
+        auto &vb = cap2.vertices[0];
+        check(vb.v[0] == v0 && vb.v[1] == v1 && vb.v[2] == v2,
+              "triangle data correct");
+    }
+}
+
+// ── Size error: CLEAR with wrong burst ───────────────────────────────────────
+
+static void test_size_error_no_output() {
+    printf("\n--- test_size_error_no_output ---\n");
+    reset();
+
+    // CLEAR command byte but burst=2 (wrong)
+    issue_command(0x8000, 16, { {0x01, 0}, {0xDEAD, 0} });
+    PipeCapture cap = run_pipeline();
+
+    check(cap.clear_pulses == 0,        "no clear on size error");
+    check(cap.vertex_valid_pulses == 0, "no vertex_valid on size error");
+    check((dut->status & 0x02) != 0,    "size_error flag set");
+}
+
+// ── Unknown command passes through without effect ────────────────────────────
+
+static void test_unknown_command_e2e() {
+    printf("\n--- test_unknown_command (end-to-end) ---\n");
+    reset();
+
+    issue_command(0x9000, 8, { {0xFF, 0} });
+    PipeCapture cap = run_pipeline();
+
+    check(cap.clear_pulses == 0,        "no clear");
+    check(cap.vertex_valid_pulses == 0, "no vertex_valid");
+}
+
+// ── Multiple triangles back-to-back ──────────────────────────────────────────
+
+static void test_two_triangles() {
+    printf("\n--- test_two_triangles ---\n");
+    reset();
+
+    uint64_t a0 = 0x100, a1 = 0x200, a2 = 0x300;
+    uint64_t b0 = 0x400, b1 = 0x500, b2 = 0x600;
+
+    // First triangle
+    issue_command(0xA000, 32, {
+        {0x03, 0}, {a0, 0}, {a1, 0}, {a2, 0},
+    });
+    PipeCapture cap1 = run_pipeline();
+    check(cap1.vertex_valid_pulses == 1,  "first triangle valid");
+    if (!cap1.vertices.empty()) {
+        auto &vb = cap1.vertices[0];
+        check(vb.v[0] == a0 && vb.v[1] == a1 && vb.v[2] == a2,
+              "first triangle data correct");
+    }
+
+    // Second triangle
+    issue_command(0xB000, 32, {
+        {0x03, 0}, {b0, 0}, {b1, 0}, {b2, 0},
+    });
+    PipeCapture cap2 = run_pipeline();
+    check(cap2.vertex_valid_pulses == 1,  "second triangle valid");
+    if (!cap2.vertices.empty()) {
+        auto &vb = cap2.vertices[0];
+        check(vb.v[0] == b0 && vb.v[1] == b1 && vb.v[2] == b2,
+              "second triangle data correct");
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -432,21 +425,21 @@ int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
 
-    dut = new Vcommand_reader;
+    dut = new Vcommand_pipeline;
     tfp = new VerilatedVcdC;
     dut->trace(tfp, 99);
-    tfp->open("command_reader.vcd");
+    tfp->open("command_pipeline.vcd");
 
     test_reset();
-    test_nop();
-    test_clear();
-    test_clear_size_error();
-    test_draw_triangle();
-    test_draw_triangle_gaps();
-    test_draw_triangle_size_error();
-    test_busy_backpressure();
-    test_unrecognized_command();
-    test_back_to_back();
+    test_nop_e2e();
+    test_clear_e2e();
+    test_draw_triangle_e2e();
+    test_draw_triangle_slow_bus();
+    test_draw_triangle_rast_stall();
+    test_clear_then_triangle();
+    test_size_error_no_output();
+    test_unknown_command_e2e();
+    test_two_triangles();
 
     printf("\n========================================\n");
     printf("  %d passed, %d failed\n", tests_passed, tests_failed);
