@@ -7,10 +7,13 @@ module vga_timing #(
 (
 	input logic clk50,
 	input logic s1,
+	input logic [5:0] pixel_in,
 	output logic clk_div,
 	output logic [7:0] GPIO_0,
 	output logic [$clog2(H_SYNC_MAX)-1:0] h_counter, // H counter size large enoguh for H resolution
-   output logic [$clog2(V_SYNC_MAX)-1:0] v_counter // V counter size large enough for V resolution
+   output logic [$clog2(V_SYNC_MAX)-1:0] v_counter, // V counter size large enough for V resolution
+	output logic [8:0] read_x,
+   output logic [7:0] read_y
 );
 
   // Counter large enough for DIVIDER
@@ -19,20 +22,18 @@ module vga_timing #(
   
   // --- Clock Divider ---
   always_ff @(posedge clk50) begin
-	 if (clk_count == DIVIDER/2 - 1) begin // Period is split in half, one half represents 1, the other represents 0
-		clk_count <= '0;
-		clk_div   <= ~clk_div;
-	 end else begin
-		clk_count <= clk_count + 1'b1;
-	 end
-  end
+		if (clk_count == DIVIDER/2 - 1) begin // Period is split in half, one half represents 1, the other represents 0
+			clk_count <= '0;
+			clk_div   <= ~clk_div;
+		end else begin
+			clk_count <= clk_count + 1'b1;
+		end
+	end
   
-  logic h_pulse;
-  logic v_pulse;
+	logic h_pulse;
+	logic v_pulse;
+	logic visible;
   
-  	logic [1:0] red; // 1 bit for now
-	logic [1:0] green; // 1 bit for now
-	logic [1:0] blue; // 1 bit for now
   
 	always_ff @(posedge clk_div) begin
     if (~s1) begin
@@ -68,14 +69,21 @@ module vga_timing #(
             v_counter <= '0;
     end
 	end
+	
+	assign visible = (h_counter < 640) && (v_counter < 480);
+	
+	assign read_x = visible ? (h_counter >> 1) : '0;
+	assign read_y = visible ? (v_counter >> 1) : '0;
+	
 		
-	assign GPIO_0[0] = h_pulse;
-	assign GPIO_0[1] = v_pulse;
-	assign GPI0_0[2] = red[0];
-	assign GPI0_0[3] = red[1];
-	assign GPI0_0[4] = green[0];
-	assign GPI0_0[5] = green[1];
-	assign GPI0_0[6] = blue[0];
-	assign GPI0_0[7] = blue[1];
+	assign GPIO_0[0] = ~h_pulse; // HSYNC active low
+	assign GPIO_0[1] = ~v_pulse; // VSYNC active low
+
+	assign GPIO_0[2] = visible ? pixel_in[4] : 1'b0; // R high bit
+	assign GPIO_0[3] = visible ? pixel_in[5] : 1'b0; // R low bit
+	assign GPIO_0[4] = visible ? pixel_in[2] : 1'b0; // G high bit
+	assign GPIO_0[5] = visible ? pixel_in[3] : 1'b0; // G low bit
+	assign GPIO_0[6] = visible ? pixel_in[0] : 1'b0; // B high bit
+	assign GPIO_0[7] = visible ? pixel_in[1] : 1'b0; // B low bit
 	
 endmodule
