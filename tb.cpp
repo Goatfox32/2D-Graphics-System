@@ -1,251 +1,453 @@
-#include "Vf2h_sdram_test_master.h"
+#include "Vcommand_pipeline.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
-#include <stdio.h>
-#include <stdlib.h>
+
+#include <cstdio>
+#include <cstdint>
+#include <vector>
+
+// ── Globals ──────────────────────────────────────────────────────────────────
 
 static vluint64_t sim_time = 0;
-static Vf2h_sdram_test_master* dut;
-static VerilatedVcdC* tfp;
-static int test_num = 0;
-static int pass_count = 0;
-static int fail_count = 0;
+static Vcommand_pipeline *dut;
+static VerilatedVcdC *tfp;
 
-void tick() {
-    dut->clk = 0; dut->eval(); tfp->dump(sim_time++);
-    dut->clk = 1; dut->eval(); tfp->dump(sim_time++);
+static int tests_passed = 0;
+static int tests_failed = 0;
+
+// ── Avalon-MM slave model ────────────────────────────────────────────────────
+// Identical to the command_reader testbench slave.
+// S_GAP ensures 1-cycle separation between waitrequest drop and first data.
+
+struct Beat {
+    uint64_t data;
+    int      gap;
+};
+
+enum SlaveState { S_IDLE, S_WAIT, S_GAP, S_DATA };
+
+static std::vector<Beat> slave_beats;
+static int        slave_wait_cycles = 1;
+static SlaveState slave_state       = S_IDLE;
+static int        slave_wait_ctr    = 0;
+static int        slave_gap_ctr     = 0;
+static int        slave_beat_idx    = 0;
+
+static void slave_reset() {
+    slave_beats.clear();
+    slave_state     = S_IDLE;
+    slave_wait_ctr  = 0;
+    slave_gap_ctr   = 0;
+    slave_beat_idx  = 0;
+    dut->avm_waitrequest   = 0;
+    dut->avm_readdatavalid = 0;
+    dut->avm_readdata      = 0;
 }
 
-void reset() {
-    dut->reset_n = 0;
-    dut->start = 0;
-    dut->read_addr = 0;
-    dut->read_size = 0;
-    dut->avm_waitrequest = 0;
+static void slave_tick() {
     dut->avm_readdatavalid = 0;
-    dut->avm_readdata = 0;
+    dut->avm_readdata      = 0;
+    dut->avm_waitrequest   = 0;
+
+    switch (slave_state) {
+    case S_IDLE:
+        if (dut->avm_read) {
+            slave_beat_idx = 0;
+            if (slave_wait_cycles > 0) {
+                dut->avm_waitrequest = 1;
+                slave_wait_ctr = slave_wait_cycles - 1;
+                slave_state = (slave_wait_ctr == 0) ? S_GAP : S_WAIT;
+            } else {
+                slave_state = S_GAP;
+            }
+        }
+        break;
+
+    case S_WAIT:
+        dut->avm_waitrequest = 1;
+        slave_wait_ctr--;
+        if (slave_wait_ctr == 0)
+            slave_state = S_GAP;
+        break;
+
+    case S_GAP:
+        slave_gap_ctr = (!slave_beats.empty()) ? slave_beats[0].gap : 0;
+        slave_state = S_DATA;
+        break;
+
+    case S_DATA:
+        if (slave_beat_idx >= (int)slave_beats.size()) {
+            slave_state = S_IDLE;
+            break;
+        }
+        if (slave_gap_ctr > 0) {
+            slave_gap_ctr--;
+            break;
+        }
+        dut->avm_readdatavalid = 1;
+        dut->avm_readdata      = slave_beats[slave_beat_idx].data;
+        slave_beat_idx++;
+        if (slave_beat_idx < (int)slave_beats.size())
+            slave_gap_ctr = slave_beats[slave_beat_idx].gap;
+        if (slave_beat_idx >= (int)slave_beats.size())
+            slave_state = S_IDLE;
+        break;
+    }
+}
+
+// ── Clock / utility ─────────────────────────────────────────────────────────
+
+static void tick() {
+    dut->clk = 0;
+    dut->eval();
+    tfp->dump(sim_time++);
+
+    slave_tick();
+
+    dut->clk = 1;
+    dut->eval();
+    tfp->dump(sim_time++);
+}
+
+static void reset() {
+    dut->reset_n    = 0;
+    dut->control    = 0;
+    dut->read_addr  = 0;
+    dut->read_size  = 0;
+    dut->rast_ready = 1;
+    slave_reset();
     for (int i = 0; i < 4; i++) tick();
     dut->reset_n = 1;
     tick();
 }
 
-void check(const char* name, int condition) {
-    test_num++;
-    if (condition) {
+static void start_pulse() {
+    dut->control = 0x01;
+    tick();
+    dut->control = 0x00;
+}
+
+// Fire a start pulse and configure the SDRAM slave in one call.
+static void issue_command(uint32_t addr, uint32_t size,
+                          std::vector<Beat> beats, int wait = 1) {
+    slave_beats       = beats;
+    slave_wait_cycles = wait;
+    dut->read_addr    = addr;
+    dut->read_size    = size;
+    start_pulse();
+}
+
+// ── Capture helpers ─────────────────────────────────────────────────────────
+
+struct PipeCapture {
+    int clear_pulses;
+    int vertex_valid_pulses;
+    struct VertexBundle {
+        uint64_t v[3];
+    };
+    std::vector<VertexBundle> vertices;
+};
+
+// Wait for the full pipeline to settle:
+//   reader not busy, both FIFOs empty, executer idle.
+static PipeCapture run_pipeline(int max_cycles = 500) {
+    PipeCapture cap = {};
+    for (int i = 0; i < max_cycles; i++) {
+        tick();
+
+        if (dut->clear)
+            cap.clear_pulses++;
+
+        if (dut->vertex_valid) {
+            cap.vertex_valid_pulses++;
+            PipeCapture::VertexBundle vb;
+            const auto *w = dut->vertex_data.data();
+            vb.v[0] = (uint64_t)w[0] | ((uint64_t)w[1] << 32);
+            vb.v[1] = (uint64_t)w[2] | ((uint64_t)w[3] << 32);
+            vb.v[2] = (uint64_t)w[4] | ((uint64_t)w[5] << 32);
+            cap.vertices.push_back(vb);
+        }
+
+        // Pipeline settled: reader idle, FIFOs empty, no output pulses
+        bool reader_idle = !(dut->status & 0x01);
+        bool fifos_empty = (dut->cmd_fifo_count == 0) && (dut->data_fifo_count == 0);
+        bool exec_quiet  = !dut->vertex_valid && !dut->clear;
+
+        if (reader_idle && fifos_empty && exec_quiet && i > 5) {
+            // A few extra cycles to confirm it's truly settled
+            for (int j = 0; j < 3; j++) {
+                tick();
+                if (dut->clear) cap.clear_pulses++;
+                if (dut->vertex_valid) {
+                    cap.vertex_valid_pulses++;
+                    PipeCapture::VertexBundle vb;
+                    const auto *w = dut->vertex_data.data();
+                    vb.v[0] = (uint64_t)w[0] | ((uint64_t)w[1] << 32);
+                    vb.v[1] = (uint64_t)w[2] | ((uint64_t)w[3] << 32);
+                    vb.v[2] = (uint64_t)w[4] | ((uint64_t)w[5] << 32);
+                    cap.vertices.push_back(vb);
+                }
+            }
+            return cap;
+        }
+    }
+    printf("  [WARN] pipeline timed out\n");
+    return cap;
+}
+
+// ── Check helper ────────────────────────────────────────────────────────────
+
+static void check(bool cond, const char *name) {
+    if (cond) {
         printf("  [PASS] %s\n", name);
-        pass_count++;
+        tests_passed++;
     } else {
         printf("  [FAIL] %s\n", name);
-        fail_count++;
+        tests_failed++;
     }
 }
 
-// Drive a burst read from the slave side.
-//   wait_cycles:  how many cycles to hold waitrequest after read is seen
-//   beat_count:   number of readdatavalid beats to send
-//   gap_pattern:  array of ints, one per beat. Value = number of idle cycles
-//                 BEFORE that beat. NULL means no gaps (back-to-back).
-//   first_byte:   value placed in readdata[7:0] on the first beat
-void drive_slave(int wait_cycles, int beat_count, int* gap_pattern, uint8_t first_byte) {
+// ══════════════════════════════════════════════════════════════════════════════
+//  Tests
+// ══════════════════════════════════════════════════════════════════════════════
 
-    // Wait for avm_read to assert
-    int timeout = 50;
-    while (!dut->avm_read && timeout-- > 0) tick();
-    if (timeout <= 0) { printf("  [TIMEOUT] waiting for avm_read\n"); return; }
+static void test_reset() {
+    printf("\n--- test_reset ---\n");
+    reset();
 
-    // Hold waitrequest
-    dut->avm_waitrequest = 1;
-    for (int i = 0; i < wait_cycles; i++) tick();
-    dut->avm_waitrequest = 0;
-    tick(); // This is the cycle where read is accepted (!waitrequest && avm_read)
+    check(dut->avm_read == 0,        "avm_read deasserted");
+    check((dut->status & 0x01) == 0,  "reader not busy");
+    check(dut->vertex_valid == 0,     "vertex_valid low");
+    check(dut->clear == 0,           "clear low");
+    check(dut->cmd_fifo_count == 0,   "cmd FIFO empty");
+    check(dut->data_fifo_count == 0,  "data FIFO empty");
+}
 
-    // Now deliver beats
-    for (int beat = 0; beat < beat_count; beat++) {
-        // Insert gap before this beat if requested
-        int gap = (gap_pattern != NULL) ? gap_pattern[beat] : 0;
-        dut->avm_readdatavalid = 0;
-        for (int g = 0; g < gap; g++) tick();
+// ── NOP end-to-end ───────────────────────────────────────────────────────────
 
-        // Drive one valid beat
-        dut->avm_readdatavalid = 1;
-        if (beat == 0)
-            dut->avm_readdata = (uint64_t)first_byte;
-        else
-            dut->avm_readdata = 0xDEAD000000000000ULL | beat;
-        tick();
+static void test_nop_e2e() {
+    printf("\n--- test_nop (end-to-end) ---\n");
+    reset();
+
+    issue_command(0x1000, 8, { {0x00, 0} });
+    PipeCapture cap = run_pipeline();
+
+    check(cap.clear_pulses == 0,        "no clear");
+    check(cap.vertex_valid_pulses == 0, "no vertex_valid");
+}
+
+// ── CLEAR end-to-end ─────────────────────────────────────────────────────────
+
+static void test_clear_e2e() {
+    printf("\n--- test_clear (end-to-end) ---\n");
+    reset();
+
+    issue_command(0x2000, 8, { {0x01, 0} });
+    PipeCapture cap = run_pipeline();
+
+    check(cap.clear_pulses == 1,        "1 clear pulse");
+    check(cap.vertex_valid_pulses == 0, "no vertex_valid");
+}
+
+// ── DRAW_TRIANGLE end-to-end ─────────────────────────────────────────────────
+
+static void test_draw_triangle_e2e() {
+    printf("\n--- test_draw_triangle (end-to-end) ---\n");
+    reset();
+
+    uint64_t v0 = 0xAAAABBBBCCCC0001ULL;
+    uint64_t v1 = 0xDDDDEEEEFFFF0002ULL;
+    uint64_t v2 = 0x1111222233330003ULL;
+
+    issue_command(0x3000, 32, {
+        {0x03, 0},   // command byte
+        {v0,   0},   // first data → slot [0]
+        {v1,   0},   // second     → slot [1]
+        {v2,   0},   // third      → slot [2]
+    });
+
+    PipeCapture cap = run_pipeline();
+
+    check(cap.clear_pulses == 0,         "no clear");
+    check(cap.vertex_valid_pulses == 1,  "1 vertex_valid pulse");
+
+    if (!cap.vertices.empty()) {
+        auto &vb = cap.vertices[0];
+        check(vb.v[0] == v0,  "slot [0] correct (bits 63:0)");
+        check(vb.v[1] == v1,  "slot [1] correct (bits 127:64)");
+        check(vb.v[2] == v2,  "slot [2] correct (bits 191:128)");
+    }
+}
+
+// ── DRAW_TRIANGLE with bus delays ────────────────────────────────────────────
+
+static void test_draw_triangle_slow_bus() {
+    printf("\n--- test_draw_triangle (slow bus) ---\n");
+    reset();
+
+    uint64_t v0 = 0x0A, v1 = 0x0B, v2 = 0x0C;
+
+    issue_command(0x4000, 32, {
+        {0x03, 0},
+        {v0,   3},   // 3 idle cycles before vertex 0
+        {v1,   2},
+        {v2,   5},
+    }, /*wait=*/3);
+
+    PipeCapture cap = run_pipeline();
+
+    check(cap.vertex_valid_pulses == 1,  "1 vertex_valid");
+    if (!cap.vertices.empty()) {
+        auto &vb = cap.vertices[0];
+        check(vb.v[0] == v0 && vb.v[1] == v1 && vb.v[2] == v2,
+              "vertices correct despite bus delays");
+    }
+}
+
+// ── DRAW_TRIANGLE with rast_ready stall ──────────────────────────────────────
+
+static void test_draw_triangle_rast_stall() {
+    printf("\n--- test_draw_triangle (rast_ready stall) ---\n");
+    reset();
+    dut->rast_ready = 0;
+
+    uint64_t v0 = 0x10, v1 = 0x20, v2 = 0x30;
+
+    issue_command(0x5000, 32, {
+        {0x03, 0}, {v0, 0}, {v1, 0}, {v2, 0},
+    });
+
+    // Let reader finish and executer consume data, but stall on rast_ready
+    for (int i = 0; i < 30; i++) tick();
+    check(dut->vertex_valid == 0,  "stalls without rast_ready");
+
+    dut->rast_ready = 1;
+    PipeCapture cap = run_pipeline();
+
+    check(cap.vertex_valid_pulses == 1,  "vertex_valid fires after rast_ready");
+    if (!cap.vertices.empty()) {
+        check(cap.vertices[0].v[0] == v0,  "data survived stall");
+    }
+}
+
+// ── CLEAR then DRAW_TRIANGLE sequentially ────────────────────────────────────
+// Two separate SDRAM reads, one after the other.
+
+static void test_clear_then_triangle() {
+    printf("\n--- test_clear_then_triangle ---\n");
+    reset();
+
+    // First: CLEAR
+    issue_command(0x6000, 8, { {0x01, 0} });
+    PipeCapture cap1 = run_pipeline();
+    check(cap1.clear_pulses == 1,  "clear fires");
+
+    // Second: DRAW_TRIANGLE
+    uint64_t v0 = 0xAA, v1 = 0xBB, v2 = 0xCC;
+    issue_command(0x7000, 32, {
+        {0x03, 0}, {v0, 0}, {v1, 0}, {v2, 0},
+    });
+    PipeCapture cap2 = run_pipeline();
+
+    check(cap2.vertex_valid_pulses == 1,  "triangle fires after clear");
+    if (!cap2.vertices.empty()) {
+        auto &vb = cap2.vertices[0];
+        check(vb.v[0] == v0 && vb.v[1] == v1 && vb.v[2] == v2,
+              "triangle data correct");
+    }
+}
+
+// ── Size error: CLEAR with wrong burst ───────────────────────────────────────
+
+static void test_size_error_no_output() {
+    printf("\n--- test_size_error_no_output ---\n");
+    reset();
+
+    // CLEAR command byte but burst=2 (wrong)
+    issue_command(0x8000, 16, { {0x01, 0}, {0xDEAD, 0} });
+    PipeCapture cap = run_pipeline();
+
+    check(cap.clear_pulses == 0,        "no clear on size error");
+    check(cap.vertex_valid_pulses == 0, "no vertex_valid on size error");
+    check((dut->status & 0x02) != 0,    "size_error flag set");
+}
+
+// ── Unknown command passes through without effect ────────────────────────────
+
+static void test_unknown_command_e2e() {
+    printf("\n--- test_unknown_command (end-to-end) ---\n");
+    reset();
+
+    issue_command(0x9000, 8, { {0xFF, 0} });
+    PipeCapture cap = run_pipeline();
+
+    check(cap.clear_pulses == 0,        "no clear");
+    check(cap.vertex_valid_pulses == 0, "no vertex_valid");
+}
+
+// ── Multiple triangles back-to-back ──────────────────────────────────────────
+
+static void test_two_triangles() {
+    printf("\n--- test_two_triangles ---\n");
+    reset();
+
+    uint64_t a0 = 0x100, a1 = 0x200, a2 = 0x300;
+    uint64_t b0 = 0x400, b1 = 0x500, b2 = 0x600;
+
+    // First triangle
+    issue_command(0xA000, 32, {
+        {0x03, 0}, {a0, 0}, {a1, 0}, {a2, 0},
+    });
+    PipeCapture cap1 = run_pipeline();
+    check(cap1.vertex_valid_pulses == 1,  "first triangle valid");
+    if (!cap1.vertices.empty()) {
+        auto &vb = cap1.vertices[0];
+        check(vb.v[0] == a0 && vb.v[1] == a1 && vb.v[2] == a2,
+              "first triangle data correct");
     }
 
-    dut->avm_readdatavalid = 0;
+    // Second triangle
+    issue_command(0xB000, 32, {
+        {0x03, 0}, {b0, 0}, {b1, 0}, {b2, 0},
+    });
+    PipeCapture cap2 = run_pipeline();
+    check(cap2.vertex_valid_pulses == 1,  "second triangle valid");
+    if (!cap2.vertices.empty()) {
+        auto &vb = cap2.vertices[0];
+        check(vb.v[0] == b0 && vb.v[1] == b1 && vb.v[2] == b2,
+              "second triangle data correct");
+    }
 }
 
-// ---------------------------------------------------------------
-// Test 1: Single-beat read (read_size=8, burstcount=1)
-// ---------------------------------------------------------------
-void test_single_beat() {
-    printf("\nTest: Single-beat read (read_size=8)\n");
-    reset();
+// ══════════════════════════════════════════════════════════════════════════════
 
-    dut->read_addr = 0x00001000;
-    dut->read_size = 8;
-    dut->start = 1;
-    tick();
-    dut->start = 0;
-
-    drive_slave(/*wait_cycles=*/0, /*beat_count=*/1, NULL, 0xAB);
-
-    // Let done propagate
-    for (int i = 0; i < 4; i++) tick();
-
-    check("done is asserted",    dut->done == 1);
-    check("result is 0xAB",      dut->result == 0xAB);
-    check("avm_read deasserted", dut->avm_read == 0);
-}
-
-// ---------------------------------------------------------------
-// Test 2: Multi-beat burst (read_size=32, burstcount=4)
-// ---------------------------------------------------------------
-void test_multi_beat() {
-    printf("\nTest: Multi-beat burst (read_size=32, burstcount=4)\n");
-    reset();
-
-    dut->read_addr = 0x00002000;
-    dut->read_size = 32;
-    dut->start = 1;
-    tick();
-    dut->start = 0;
-
-    drive_slave(0, 4, NULL, 0x42);
-
-    for (int i = 0; i < 4; i++) tick();
-
-    check("done is asserted",       dut->done == 1);
-    check("result is 0x42",         dut->result == 0x42);
-}
-
-// ---------------------------------------------------------------
-// Test 3: Gaps in readdatavalid mid-burst
-// ---------------------------------------------------------------
-void test_gaps_in_valid() {
-    printf("\nTest: Gaps in readdatavalid (4 beats with pauses)\n");
-    reset();
-
-    dut->read_addr = 0x00003000;
-    dut->read_size = 32;
-    dut->start = 1;
-    tick();
-    dut->start = 0;
-
-    // gap_pattern: 0 idle before beat 0, 3 before beat 1, 0 before beat 2, 5 before beat 3
-    int gaps[] = {0, 3, 0, 5};
-    drive_slave(0, 4, gaps, 0x77);
-
-    for (int i = 0; i < 4; i++) tick();
-
-    check("done is asserted",  dut->done == 1);
-    check("result is 0x77",    dut->result == 0x77);
-}
-
-// ---------------------------------------------------------------
-// Test 4: Extended waitrequest
-// ---------------------------------------------------------------
-void test_long_waitrequest() {
-    printf("\nTest: Waitrequest held for 10 cycles\n");
-    reset();
-
-    dut->read_addr = 0x00004000;
-    dut->read_size = 8;
-    dut->start = 1;
-    tick();
-    dut->start = 0;
-
-    drive_slave(/*wait_cycles=*/10, 1, NULL, 0x55);
-
-    for (int i = 0; i < 4; i++) tick();
-
-    check("done is asserted",  dut->done == 1);
-    check("result is 0x55",    dut->result == 0x55);
-}
-
-// ---------------------------------------------------------------
-// Test 5: Back-to-back transactions
-// ---------------------------------------------------------------
-void test_back_to_back() {
-    printf("\nTest: Back-to-back transactions\n");
-    reset();
-
-    // First transaction
-    dut->read_addr = 0x00005000;
-    dut->read_size = 8;
-    dut->start = 1;
-    tick();
-    dut->start = 0;
-
-    drive_slave(0, 1, NULL, 0x11);
-    for (int i = 0; i < 4; i++) tick();
-
-    check("txn1: done asserted",  dut->done == 1);
-    check("txn1: result is 0x11", dut->result == 0x11);
-
-    // Second transaction without reset
-    dut->read_addr = 0x00006000;
-    dut->read_size = 16;
-    dut->start = 1;
-    tick();
-    dut->start = 0;
-
-    drive_slave(2, 2, NULL, 0x22);
-    for (int i = 0; i < 4; i++) tick();
-
-    check("txn2: done asserted",  dut->done == 1);
-    check("txn2: result is 0x22", dut->result == 0x22);
-}
-
-// ---------------------------------------------------------------
-// Test 6: Small read_size (1 byte — burstcount should be 1)
-// ---------------------------------------------------------------
-void test_small_read_size() {
-    printf("\nTest: Minimum read_size=1 (burstcount should be 1)\n");
-    reset();
-
-    dut->read_addr = 0x00007000;
-    dut->read_size = 1;
-    dut->start = 1;
-    tick();
-    dut->start = 0;
-
-    drive_slave(0, 1, NULL, 0xEE);
-
-    for (int i = 0; i < 4; i++) tick();
-
-    check("done is asserted",  dut->done == 1);
-    check("result is 0xEE",    dut->result == 0xEE);
-}
-
-// ---------------------------------------------------------------
-
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
 
-    dut = new Vf2h_sdram_test_master;
+    dut = new Vcommand_pipeline;
     tfp = new VerilatedVcdC;
     dut->trace(tfp, 99);
-    tfp->open("waveform.vcd");
+    tfp->open("command_pipeline.vcd");
 
-    test_single_beat();
-    test_multi_beat();
-    test_gaps_in_valid();
-    test_long_waitrequest();
-    test_back_to_back();
-    test_small_read_size();
+    test_reset();
+    test_nop_e2e();
+    test_clear_e2e();
+    test_draw_triangle_e2e();
+    test_draw_triangle_slow_bus();
+    test_draw_triangle_rast_stall();
+    test_clear_then_triangle();
+    test_size_error_no_output();
+    test_unknown_command_e2e();
+    test_two_triangles();
 
-    printf("\n=============================\n");
-    printf("Results: %d passed, %d failed out of %d\n", pass_count, fail_count, test_num);
-    printf("=============================\n");
+    printf("\n========================================\n");
+    printf("  %d passed, %d failed\n", tests_passed, tests_failed);
+    printf("========================================\n");
 
     tfp->close();
-    dut->final();
+    delete tfp;
     delete dut;
 
-    return fail_count > 0 ? 1 : 0;
+    return tests_failed > 0 ? 1 : 0;
 }
