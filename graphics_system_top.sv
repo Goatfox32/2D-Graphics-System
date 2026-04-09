@@ -104,6 +104,7 @@ module graphics_system_top (
     logic [X_WIDTH-1:0]    rast_write_x;
     logic [Y_WIDTH-1:0]    rast_write_y;
     logic [PIXEL_SIZE-1:0] rast_write_color;
+    logic                  fb_busy;
 
     // ==========================================
     // Frame Buffer - VGA interface
@@ -220,7 +221,8 @@ module graphics_system_top (
         .write_en(rast_write_en),
         .write_x(rast_write_x),
         .write_y(rast_write_y),
-        .write_color(rast_write_color)
+        .write_color(rast_write_color),
+        .fb_busy(fb_busy)
 	);
 
     frame_buffer #(
@@ -230,15 +232,18 @@ module graphics_system_top (
         .X_WIDTH(X_WIDTH),
         .Y_WIDTH(Y_WIDTH)
 	) fb_u (
-        .wr_clk(clk50),
+        .s1(s1),
+        .hps_clear(rast_clear),
+        .write_clk(clk50),
         .write_en(rast_write_en),
         .write_x(rast_write_x),
         .write_y(rast_write_y),
         .write_data(rast_write_color),
-        .rd_clk(vga_clk),
+        .read_clk(vga_clk),
         .read_x(fb_read_x),
         .read_y(fb_read_y),
-        .read_data(fb_read_data)
+        .read_data(fb_read_data),
+        .busy(fb_busy)
 	);
 
     vga_timing vga_u (
