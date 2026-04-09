@@ -144,6 +144,11 @@ module rasterizer #(
 	logic [PIXEL_SIZE-1:0] mixed_color;
 
     enum logic [0:0] { IDLE, SCAN } state, next_state;
+
+	logic next_write_en;
+	logic [X_WIDTH-1:0] next_write_x;
+	logic [Y_WIDTH-1:0] next_write_y;
+	logic [PIXEL_SIZE-1:0] next_write_color;
 	
    ////////////// Bounding box //////////////
 	
@@ -246,6 +251,7 @@ module rasterizer #(
 			
 			// Color mixing calculation
 			if (pixel_valid) begin
+				/*
 				r_num = e2_n * $signed({1'b0, r1}) +
 						  e3_n * $signed({1'b0, r2}) +
 						  e1_n * $signed({1'b0, r3});
@@ -261,12 +267,15 @@ module rasterizer #(
 				r_mix = r_num / area_n;
 				g_mix = g_num / area_n;
 				b_mix = b_num / area_n;
-
-				mixed_color = {r_mix[4:3], g_mix[5:4], b_mix[4:3]};
+				*/
+				mixed_color = {r1[4:3], g1[5:4], b1[4:3]};
 			end
 		end
 
-        write_en = (state == SCAN) && pixel_valid && (y_curr <= y_max);
+        next_write_en = (state == SCAN) && pixel_valid && (y_curr <= y_max);
+		next_write_x = pixel_valid ? (x_curr) : '0;
+		next_write_y = pixel_valid ? (y_curr) : '0;
+		next_write_color = pixel_valid ? mixed_color : '0;
 	end
 
 	always_ff @(posedge clk) begin
@@ -278,6 +287,11 @@ module rasterizer #(
             v2 <= '0;
             v3 <= '0;
             state <= IDLE;
+
+			write_en <= 1'b0;
+			write_x <= '0;
+			write_y <= '0;
+			write_color <= '0;
 		end else begin
             v1 <= next_v1;
             v2 <= next_v2;
@@ -285,11 +299,12 @@ module rasterizer #(
             x_curr <= next_x_curr;
             y_curr <= next_y_curr;
             state <= next_state;
+
+			write_en <= next_write_en;
+			write_x <= next_write_x;
+			write_y <= next_write_y;
+			write_color <= next_write_color;
 		end
 	end
-	
-	assign write_x = pixel_valid ? (x_curr) : '0;
-	assign write_y = pixel_valid ? (y_curr) : '0;
-	assign write_color = pixel_valid ? mixed_color : '0;
 
 endmodule
