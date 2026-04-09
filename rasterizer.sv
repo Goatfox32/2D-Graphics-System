@@ -1,3 +1,12 @@
+// To-do list:
+// Latch input vertices
+// handshake interface
+// color1 overuse          					----- DONE
+// color interpolation
+// reset logic (only resets when s1 low?)
+// write_x/write_y gated by pixel_valid
+
+
 module rasterizer #(
 	parameter int FB_WIDTH = 320,
 	parameter int FB_HEIGHT = 240,
@@ -10,6 +19,7 @@ module rasterizer #(
 	input logic s1,
 	
 	input logic [191:0] vertex_data,
+    input logic vertex_valid,
 
 	output logic rast_ready,
 
@@ -75,12 +85,7 @@ module rasterizer #(
 	
 	// 16 bits color 
 	
-	logic [63:0] v1, v2, v3;
-
-	assign v1 = vertex_data[191:128];
-	assign v2 = vertex_data[127:64];
-	assign v3 = vertex_data[63:0];
-	
+	logic [63:0] v1, v2, v3, next_v1, next_v2, next_v3;
 	
 	logic [X_WIDTH-1:0] x1, x2, x3;
 	
@@ -123,41 +128,82 @@ module rasterizer #(
 	assign g1 = color1[10:5];
 	assign b1 = color1[15:11];
 
-	assign r2 = color1[4:0];
-	assign g2 = color1[10:5];
-	assign b2 = color1[15:11];
+	assign r2 = color2[4:0];
+	assign g2 = color2[10:5];
+	assign b2 = color2[15:11];
 
-	assign r3 = color1[4:0];
-	assign g3 = color1[10:5];
-	assign b3 = color1[15:11];
+	assign r3 = color3[4:0];
+	assign g3 = color3[10:5];
+	assign b3 = color3[15:11];
 
-	
 	logic pixel_valid;
 	logic signed [31:0] area, area_n;
 	logic signed [31:0] e1_n, e2_n, e3_n;
 	logic signed [47:0] r_num, g_num, b_num;
 	logic signed [31:0] e1, e2, e3;
 	logic [PIXEL_SIZE-1:0] mixed_color;
-	
+
+    enum logic [0:0] { IDLE, SCAN } state, next_state;
 	
    ////////////// Bounding box //////////////
 	
-	logic [X_WIDTH-1:0] x_max, x_min, x_curr;
+	logic [X_WIDTH-1:0] x_max, x_min, x_curr, next_x_curr;
 	
 	assign x_max = max3x(x1,x2,x3);
 	assign x_min = min3x(x1,x2,x3);
 	
-	logic [Y_WIDTH-1:0] y_max, y_min, y_curr;
+	logic [Y_WIDTH-1:0] y_max, y_min, y_curr, next_y_curr;
 	
 	assign y_max = max3y(y1,y2,y3);
 	assign y_min = min3y(y1,y2,y3);
 	
 	always_comb begin
-	
+        next_v1 = v1;
+        next_v2 = v2;
+        next_v3 = v3;
+        next_x_curr = x_curr;
+        next_y_curr = y_curr;
+        next_state = state;
+        rast_ready = 1'b0;
+
+        case (state)
+            IDLE: begin
+                rast_ready = 1'b1;
+
+                if (vertex_valid) begin
+                    next_v1 = vertex_data[63:0];
+                    next_v2 = vertex_data[127:64];
+                    next_v3 = vertex_data[191:128];
+
+                    next_x_curr = x_min;
+                    next_y_curr = y_min;
+
+                    next_state = SCAN;
+                end
+            end
+
+            SCAN: begin
+                rast_ready = 1'b0;
+
+                if (y_curr > y_max || area == 0) begin
+                    next_state = IDLE;
+                end
+                else if(x_curr >= x_max) begin
+                    next_x_curr = x_min;
+                    next_y_curr = y_curr + 1;
+                end
+                else begin
+                    next_x_curr = x_curr + 1;
+                    next_y_curr = y_curr;
+                end
+            end
+
+            default: next_state = IDLE;
+        endcase
+
 		e1 = '0;
 		e2 = '0;
 		e3 = '0;
-		area = '0;
 
 		area_n = '0;
 		e1_n = '0;
@@ -174,6 +220,7 @@ module rasterizer #(
 		mixed_color = '0;
 		pixel_valid = 1'b0;
 
+        // THIS TIMING MAY FAIL IF THE AREA CALCULATION TAKES TOO LONG, MAY NEED TO PIPELINE
 		area = sx1*(sy2 - sy3) + sx2*(sy3 - sy1) + sx3*(sy1 - sy2);
 		
 		// Edge equations and windings
@@ -218,36 +265,31 @@ module rasterizer #(
 				mixed_color = {r_mix[4:3], g_mix[5:4], b_mix[4:3]};
 			end
 		end
+
+        write_en = (state == SCAN) && pixel_valid && (y_curr <= y_max);
 	end
 
 	always_ff @(posedge clk) begin
 	
 		if (~s1) begin
-			  x_curr <= x_min;
-			  y_curr <= y_min;
-			  rast_ready <= '0;
+            x_curr <= x_min;
+            y_curr <= y_min;
+            v1 <= '0;
+            v2 <= '0;
+            v3 <= '0;
+            state <= IDLE;
 		end else begin
-		
-			if (y_curr <= y_max) begin
-			
-				rast_ready <= '0;
-				
-				if (x_curr < x_max) begin
-					x_curr <= x_curr + 1;
-				end else begin
-					x_curr <= x_min;
-					y_curr <= y_curr + 1;
-				end
-				
-			end else begin
-				rast_ready <= 1;
-			end
-				
+            v1 <= next_v1;
+            v2 <= next_v2;
+            v3 <= next_v3;
+            x_curr <= next_x_curr;
+            y_curr <= next_y_curr;
+            state <= next_state;
 		end
 	end
-		
-		assign write_en = pixel_valid;
-		assign write_x = pixel_valid ? (x_curr) : '0;
-		assign write_y = pixel_valid ? (y_curr) : '0;
-		assign write_color = pixel_valid ? mixed_color : '0;
+	
+	assign write_x = pixel_valid ? (x_curr) : '0;
+	assign write_y = pixel_valid ? (y_curr) : '0;
+	assign write_color = pixel_valid ? mixed_color : '0;
+
 endmodule

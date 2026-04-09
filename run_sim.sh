@@ -4,15 +4,15 @@ set -e
 echo "=== Verilating ==="
 verilator --cc --trace --exe \
     -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSEDSIGNAL \
-    command_pipeline.sv command_reader.sv command_executer.sv fifo.sv \
+    rasterizer.sv \
     tb.cpp
 
 echo "=== Building ==="
-make -C obj_dir -f Vcommand_pipeline.mk Vcommand_pipeline -j$(nproc)
+make -C obj_dir -f Vrasterizer.mk Vrasterizer -j$(nproc)
 
 echo "=== Running ==="
-./obj_dir/Vcommand_pipeline
+./obj_dir/Vrasterizer
 
 echo ""
-echo "=== Waveform saved to command_pipeline.vcd ==="
-echo "Open with: surfer command_executer.vcd"
+echo "=== Waveform saved to rasterizer.vcd ==="
+echo "Open with: surfer rasterizer.vcd"

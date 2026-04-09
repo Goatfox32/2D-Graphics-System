@@ -215,6 +215,7 @@ module graphics_system_top (
         .clk(vga_clk),
         .s1(s1),
         .vertex_data(vertex_data),
+        .vertex_valid(vertex_valid),
         .rast_ready(rast_enable),
         .write_en(rast_write_en),
         .write_x(rast_write_x),
