@@ -185,7 +185,7 @@ module rasterizer #(
             SCAN: begin
                 rast_ready = 1'b0;
 
-                if (y_curr > y_max || area == 0) begin
+                if (y_curr > y_max) begin
                     next_state = IDLE;
                 end
                 else if(x_curr >= x_max) begin

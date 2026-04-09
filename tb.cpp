@@ -39,9 +39,7 @@ int main(int argc, char** argv) {
     dut->clk = 0;
     dut->s1 = 0;
     dut->vertex_valid = 0;
-    dut->vertex_data_0 = 0;  // if vertex_data is wide, Verilator splits it
-    dut->vertex_data_1 = 0;
-    dut->vertex_data_2 = 0;
+    for (int i = 0; i < 6; i++) dut->vertex_data[i] = 0;
     for (int i = 0; i < 4; i++) tick();
 
     dut->s1 = 1;  // release reset
@@ -112,4 +110,16 @@ int main(int argc, char** argv) {
     if (!saw_ready_drop) { printf("FAIL: rast_ready never dropped\n"); pass = false; }
     if (pixel_count == 0) { printf("FAIL: no pixels written\n"); pass = false; }
     // Expected pixel count for this triangle: area = |100*(40-120) + 150*(120-40) + 100*(40-40)| / 2
-    //
+    //                                             = |-8000 + 12000 + 0| / 2 = 2000
+    if (pixel_count > 0) {
+        printf("expected ~2000 pixels (triangle area), got %d\n", pixel_count);
+        if (pixel_count < 1500 || pixel_count > 2500) {
+            printf("WARN: pixel count far from expected\n");
+        }
+    }
+
+    tfp->close();
+    delete dut;
+    printf("%s\n", pass ? "PASS" : "FAIL");
+    return pass ? 0 : 1;
+}
