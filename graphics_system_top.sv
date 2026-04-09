@@ -10,7 +10,7 @@ module graphics_system_top (
     input  logic        clk50,
     input  logic        s1,
     output logic [7:0]  LED,
-    output logic [35:0] GPIO_0,
+    inout  wire  [35:0] GPIO_0,
 
     output wire [14:0]  HPS_DDR3_ADDR,
     output wire [2:0]   HPS_DDR3_BA,
@@ -89,81 +89,40 @@ module graphics_system_top (
     logic        data_buffer_read_en;
 
     // ==========================================
-    // Rasterizer interface
+    // Rasterizer-Command interface
     // ==========================================
     logic         rast_enable;
     logic         rast_clear;
     logic         vertex_valid;
     logic [191:0] vertex_data;
     logic [63:0]  rast_set_pixel;
-    assign rast_enable = 1'b1;
 
-    // Debugging:
-    // 100ms stretch helper — instantiate one per signal you want to see
-    logic [22:0] stretch_start, stretch_busy, stretch_cmd_wr, stretch_data_wr, stretch_vvalid;
+    // ==========================================
+    // Rasterizer-Frame Buffer interface
+    // ==========================================
+    logic                  rast_write_en;
+    logic [X_WIDTH-1:0]    rast_write_x;
+    logic [Y_WIDTH-1:0]    rast_write_y;
+    logic [PIXEL_SIZE-1:0] rast_write_color;
 
-    logic start_pulse = 1'b0;
-    always_ff @(posedge clk50) begin
-        if (!system_reset_n) begin
-            stretch_start   <= 0;
-            stretch_busy    <= 0;
-            stretch_cmd_wr  <= 0;
-            stretch_data_wr <= 0;
-            stretch_vvalid  <= 0;
-        end else begin
-            // Replace the signals on the right with the actual hierarchical paths
-            if (start_pulse)                          stretch_start   <= 23'd5_000_000;
-            else if (stretch_start   != 0)            stretch_start   <= stretch_start - 1;
+    // ==========================================
+    // Frame Buffer - VGA interface
+    // ==========================================
+    logic [X_WIDTH-1:0]    fb_read_x;
+    logic [Y_WIDTH-1:0]    fb_read_y;
+    logic [PIXEL_SIZE-1:0] fb_read_data;
+    logic                  vga_clk;
 
-            if (gpu_status_internal[0])               stretch_busy    <= 23'd5_000_000;
-            else if (stretch_busy    != 0)            stretch_busy    <= stretch_busy - 1;
+    logic [$clog2(800)-1:0] h_counter;
+	logic [$clog2(525)-1:0] v_counter;
 
-            if (command_buffer_write_en)              stretch_cmd_wr  <= 23'd5_000_000;
-            else if (stretch_cmd_wr  != 0)            stretch_cmd_wr  <= stretch_cmd_wr - 1;
+    localparam int FB_WIDTH   = 320;
+	localparam int FB_HEIGHT  = 240;
+	localparam int PIXEL_SIZE = 6;
+	localparam int X_WIDTH    = 9;
+	localparam int Y_WIDTH    = 8;
 
-            if (data_buffer_write_en)                 stretch_data_wr <= 23'd5_000_000;
-            else if (stretch_data_wr != 0)            stretch_data_wr <= stretch_data_wr - 1;
-
-            if (vertex_valid)                         stretch_vvalid  <= 23'd5_000_000;
-            else if (stretch_vvalid  != 0)            stretch_vvalid  <= stretch_vvalid - 1;
-        end
-    end
-
-    /*
-    assign LED[0] = (stretch_start   != 0);  // Did the reader see a start edge?
-    assign LED[1] = (stretch_busy    != 0);  // Did the reader become busy?
-    assign LED[2] = (stretch_cmd_wr  != 0);  // Did the reader write to cmd FIFO?
-    assign LED[3] = (stretch_data_wr != 0);  // Did the reader write to data FIFO?
-    assign LED[4] = (stretch_vvalid  != 0);  // Did the executer fire vertex_valid?
-    assign LED[5] = gpu_status_internal[1];  // size_error (latched, no stretch needed)
-    assign LED[6] = gpu_status_internal[3];  // stuck indicator
-    assign LED[7] = !system_reset_n;
-    */
-    
-    // v0 in vertex_data[63:0]
-    assign LED[0] = (vertex_data[8:0]    == 9'd10) && (vertex_data[16:9]  == 8'd20);
-    assign LED[1] = (vertex_data[21:17]  == 5'd31) && (vertex_data[27:22] == 6'd0)
-                                                && (vertex_data[32:28] == 5'd0);
-
-    // v1 in vertex_data[127:64]
-    assign LED[2] = (vertex_data[72:64]  == 9'd20) && (vertex_data[80:73] == 8'd40);
-    assign LED[3] = (vertex_data[85:81]  == 5'd0)  && (vertex_data[91:86] == 6'd63) // Failed
-                                                && (vertex_data[96:92] == 5'd0);
-
-    // v2 in vertex_data[191:128]
-    assign LED[4] = (vertex_data[136:128] == 9'd30) && (vertex_data[144:137] == 8'd60);
-    assign LED[5] = (vertex_data[149:145] == 5'd0)  && (vertex_data[155:150] == 6'd0) // Failed
-                                                && (vertex_data[160:156] == 5'd31);
-
-    // Padding sanity: top bits of each vertex should be zero
-    assign LED[6] = (vertex_data[63:33]   == 31'd0)
-                && (vertex_data[127:97]  == 31'd0)
-                && (vertex_data[191:161] == 31'd0);
-
-    // All eight checks AND'd — single "everything correct" indicator
-    assign LED[7] = LED[0] & LED[1] & LED[2] & LED[3] & LED[4] & LED[5] & LED[6]; // Failed
-    
-
+    // Reset holding logic
     logic [26:0] reset_counter;
     always_ff @(posedge clk50) begin
         if (!s1) begin
@@ -244,6 +203,53 @@ module graphics_system_top (
         .rast_clear          (rast_clear),
         .rast_set_pixel      (rast_set_pixel)
     );
+
+
+    rasterizer #(
+        .FB_WIDTH(FB_WIDTH),
+        .FB_HEIGHT(FB_HEIGHT),
+        .PIXEL_SIZE(PIXEL_SIZE),
+        .X_WIDTH(X_WIDTH),
+        .Y_WIDTH(Y_WIDTH)
+	) rast_u (
+        .clk(vga_clk),
+        .s1(s1),
+        .vertex_data(vertex_data),
+        .rast_ready(rast_enable),
+        .write_en(rast_write_en),
+        .write_x(rast_write_x),
+        .write_y(rast_write_y),
+        .write_color(rast_write_color)
+	);
+
+    frame_buffer #(
+        .FB_WIDTH(FB_WIDTH),
+        .FB_HEIGHT(FB_HEIGHT),
+        .PIXEL_SIZE(PIXEL_SIZE),
+        .X_WIDTH(X_WIDTH),
+        .Y_WIDTH(Y_WIDTH)
+	) fb_u (
+        .clk(vga_clk),
+        .write_en(rast_write_en),
+        .write_x(rast_write_x),
+        .write_y(rast_write_y),
+        .write_data(rast_write_color),
+        .read_x(fb_read_x),
+        .read_y(fb_read_y),
+        .read_data(fb_read_data)
+	);
+
+    vga_timing vga_u (
+        .clk50(clk50),
+        .s1(s1),
+        .pixel_in(fb_read_data),
+        .clk_div(vga_clk),
+        .GPIO_0(GPIO_0[7:0]),
+        .h_counter(h_counter),
+        .v_counter(v_counter),
+        .read_x(fb_read_x),
+        .read_y(fb_read_y)
+	);
 
     // ==========================================
     // Qsys system

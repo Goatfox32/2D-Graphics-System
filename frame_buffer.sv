@@ -1,5 +1,5 @@
 module frame_buffer #(
-	parameter H_SYNC_MAX = 800, // 640 visble pixel timings, 16 front porch timings, 96 H-Sync timings, and 48 back porch timings
+   parameter H_SYNC_MAX = 800, // 640 visble pixel timings, 16 front porch timings, 96 H-Sync timings, and 48 back porch timings
    parameter V_SYNC_MAX = 525, // 480 visble line timings, 10 front porch timingss, 2 V-Sync timings, and 33 back porch timings
    parameter int FB_WIDTH  = 320, // Frame buffer width
    parameter int FB_HEIGHT = 240, // Frame buffer height

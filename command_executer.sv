@@ -25,9 +25,9 @@ module command_executer (
     output logic [63:0]  rast_set_pixel
 );
 
-    localparam NOP = 8'h00,
-               CLEAR = 8'h01,
-               DRAW_PIXEL = 8'h02,
+    localparam NOP           = 8'h00,
+               CLEAR         = 8'h01,
+               DRAW_PIXEL    = 8'h02,
                DRAW_TRIANGLE = 8'h03;
 
     logic next_vertex_valid;
@@ -44,8 +44,8 @@ module command_executer (
         if (!reset_n) begin
             vertex_valid      <= 1'b0;
             vertex_data       <= '0;
-            rast_clear             <= 1'b0;
-            rast_set_pixel         <= '0;
+            rast_clear        <= 1'b0;
+            rast_set_pixel    <= '0;
 
             vertices_remaining <= 3'b0;
 
@@ -55,7 +55,7 @@ module command_executer (
             vertex_valid      <= next_vertex_valid;
             vertex_data       <= next_vertex_data;
             rast_clear        <= next_rast_clear;
-            rast_set_pixel         <= next_rast_set_pixel;
+            rast_set_pixel    <= next_rast_set_pixel;
 
             vertices_remaining <= next_vertices_remaining;
 

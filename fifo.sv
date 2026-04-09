@@ -5,8 +5,8 @@
 `default_nettype none
 
 module fifo (
-    input  logic         clk,
-    input  logic         reset_n,
+    input  logic        clk,
+    input  logic        reset_n,
 
     input  logic [63:0] data_in,
     input  logic        write_en,

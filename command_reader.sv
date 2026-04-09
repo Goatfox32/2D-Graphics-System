@@ -28,9 +28,7 @@ module command_reader (
     input  logic         data_buffer_full,
     input  logic [4:0]   data_buffer_count,
     output logic         data_buffer_en,
-    output logic [63:0]  data_buffer_data,
-
-    output logic start_pulse
+    output logic [63:0]  data_buffer_data
 );
 
     localparam NOP = 8'h00,
@@ -63,7 +61,7 @@ module command_reader (
         if (!reset_n) start_r <= 1'b0;
         else          start_r <= control[0]; // Control bit 0 triggers start
     end
-    assign start_pulse = control[0] & ~start_r;
+    wire start_pulse = control[0] & ~start_r;
 
     // --- Registered signals
     always_ff @(posedge clk) begin

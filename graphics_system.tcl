@@ -22,6 +22,7 @@ set_instance_parameter_value hps_0 {USB1_PinMuxing} {HPS I/O Set 0}
 set_instance_parameter_value hps_0 {USB1_Mode} {SDR}
 set_instance_parameter_value hps_0 {EMAC1_PinMuxing} {HPS I/O Set 0}
 set_instance_parameter_value hps_0 {EMAC1_Mode} {RGMII}
+set_instance_parameter_value hps_0 {MEM_DQ_WIDTH} {32}
 
 # Bridge config
 set_instance_parameter_value hps_0 {S2F_Width} {0}
