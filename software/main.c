@@ -18,5 +18,8 @@ int main() {
     uint8_t status = read_status();
     printf("GPU Status: 0x%02X\n", status);
 
+    int exit = 0;
+    spinning_triangles_demo(&exit);
+
     return 0;
 }
