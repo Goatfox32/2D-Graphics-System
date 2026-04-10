@@ -24,14 +24,17 @@ module rasterizer #(
 	input logic [127:0] sprite_data,
 	input logic sprite_valid,
 	
+	input logic fb_busy,
+	
 	output logic rast_ready,
 
 	output logic write_en,
 	output logic [X_WIDTH-1:0] write_x,
 	output logic [Y_WIDTH-1:0] write_y,
 	output logic [PIXEL_SIZE-1:0] write_color,
-
-	input logic fb_busy
+	
+	output logic frame_ready_out_r
+	
 );
 	////////// max & min function /////////
 	function automatic [X_WIDTH-1:0] max3x
@@ -85,6 +88,8 @@ module rasterizer #(
 							    : ((b <= c) ? b : c);
 		end
 	endfunction
+	
+	logic frame_ready_out;
 	
    ////////////// Components /////////////
 	
@@ -232,9 +237,11 @@ module rasterizer #(
 			g_mix = '0;
 			b_mix = '0;
 			mixed_color = '0;
-			pixel_valid = 1'b0;
+			pixel_valid = '0;
+			
+			frame_ready_out = '0;
 
-        case (state)
+			case (state)
             IDLE: begin
                 rast_ready = 1'b1;
 
@@ -268,8 +275,10 @@ module rasterizer #(
                rast_ready = 1'b0;
 
 					if (!fb_busy) begin
+					frame_ready_out = '0;
 						if (y_curr > y_max) begin
 							next_state = IDLE;
+							frame_ready_out = 1;
 						end
 						else if(x_curr >= x_max) begin
 							next_x_curr = x_min;
@@ -284,8 +293,10 @@ module rasterizer #(
 				
 				SCAN_SPRITE: begin
             if (!fb_busy) begin
+				frame_ready_out = '0;
 					if (y_curr > sprite_y_max) begin
 						next_state = IDLE;
+						frame_ready_out = 1;
                end
                else if (x_curr >= sprite_x_max) begin
                   next_x_curr = sprite_x;
@@ -354,7 +365,7 @@ module rasterizer #(
 		end
 		
 		else if (state == SCAN_SPRITE) begin
-			 if (sprite_bits[sprite_idx]) begin
+			 if (sprite_bits[sprite_idx] && (y_curr <= sprite_y_max)) begin
 				  pixel_valid = 1'b1;
 				  mixed_color = {sprite_r[4:3], sprite_g[5:4], sprite_b[4:3]};
 			 end
@@ -379,6 +390,8 @@ module rasterizer #(
 			v3 <= '0;
 			sprite_reg <= '0;
 			state <= IDLE;
+			
+			frame_ready_out_r <= 1'b0;
 
 			write_en <= 1'b0;
 			write_x <= '0;
@@ -399,6 +412,8 @@ module rasterizer #(
 			write_x <= next_write_x;
 			write_y <= next_write_y;
 			write_color <= next_write_color;
+			
+			frame_ready_out_r <= frame_ready_out;
 		end
 	end
 

@@ -20,6 +20,7 @@ module frame_buffer #(
 	input logic [PIXEL_SIZE-1:0] write_data, // data being written into frame buffer from rasterzier
 	input logic [X_WIDTH-1:0] read_x,
 	input logic [Y_WIDTH-1:0] read_y,
+	input logic frame_ready_in,
 	output logic [PIXEL_SIZE-1:0] read_data, // store pixel data
 	output logic busy
 );
@@ -41,6 +42,8 @@ module frame_buffer #(
 	logic frame_swap_r1, frame_swap_r2;
 	logic frame_window_rd; // frame swap window
 	logic frame_swap;
+	
+	logic frame_ready_pending;
 	
 	enum logic [1:0] { CLEAR, ON, OUTPUT_A, OUTPUT_B } state, next_state, last_state;
 	
@@ -64,6 +67,7 @@ module frame_buffer #(
 		mem_A_q = '0;
 		mem_B_q = '0;
 		read_addr_r = '0;
+		frame_ready_pending = '0;
    end
 	 
 	always_comb begin
@@ -99,7 +103,7 @@ module frame_buffer #(
 			OUTPUT_A: begin
 				if (clear_req)
 					next_state = CLEAR;
-				else if (frame_swap)
+				else if (frame_swap && frame_ready_pending)
 					next_state = OUTPUT_B;
 				
 			end
@@ -107,7 +111,7 @@ module frame_buffer #(
 			OUTPUT_B: begin
 				if (clear_req)
 					next_state = CLEAR;
-				else if (frame_swap)
+				else if (frame_swap && frame_ready_pending)
 					next_state = OUTPUT_A;
 			end
 				
@@ -128,7 +132,7 @@ module frame_buffer #(
 	assign clear_req = s1_w2_d & ~s1_w2; 
 	
 	
-		// ---- FRAME SWAP SYNCHRONIZATION + PULSE CONTROL ----
+	// ---- FRAME SWAP SYNCHRONIZATION + PULSE CONTROL ----
 	always_ff @(posedge write_clk) begin
 		frame_swap_r1 <= frame_window_rd;
 		frame_swap_r2 <= frame_swap_r1;
@@ -154,16 +158,24 @@ module frame_buffer #(
 		display_sel_r2 <= display_sel_r1; // The read clock's version of the write clocks state machine
 		
 		if (display_sel_r2 == '0) begin // OUTPUT_A
-			mem_A_q <= mem_A[read_addr_r];                              // pure RAM read
+			mem_A_q <= mem_A[read_addr_r];                  // pure RAM read
 			read_data <= (oob_r) ? '0 : mem_A_q;            // separate output mux
 		end
 		else begin // OUTPUT_B
-			mem_B_q <= mem_B[read_addr_r];                              // pure RAM read
+			mem_B_q <= mem_B[read_addr_r];                  // pure RAM read
 			read_data <= (oob_r) ? '0 : mem_B_q;            // separate output mux
 		end
 	end
 	
 	always_ff @(posedge write_clk) begin
+		
+		if (state == CLEAR || next_state == CLEAR)
+			frame_ready_pending <= 1'b0;
+		else if ((state == OUTPUT_A && next_state == OUTPUT_B) || (state == OUTPUT_B && next_state == OUTPUT_A))
+			frame_ready_pending <= 1'b0;
+		else if (frame_ready_in)
+			frame_ready_pending <= 1'b1;
+		
 	
 		if ((state == OUTPUT_A) && (next_state == CLEAR))
 			last_state <= OUTPUT_A;
