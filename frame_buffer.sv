@@ -26,9 +26,11 @@ module frame_buffer #(
 	logic s1_w1, s1_w2, s1_w2_d; // Used for clock synchronization and edge detection
 	logic clear_req;
 
+	logic [PIXEL_SIZE-1:0] mem_q;
+	logic oob_r, busy_r3;
 	
 	logic [PIXEL_SIZE-1:0] mem [0:SIZE-1]; // Memory array that stores pixel data
-   logic [ADDR_W-1:0] write_addr, read_addr, clear_addr, next_clear_addr; // Write Address, Read Address, and Clear Address
+    logic [ADDR_W-1:0] write_addr, read_addr, clear_addr, next_clear_addr; // Write Address, Read Address, and Clear Address
 	
 	enum logic [0:0] { CLEAR, ON } state, next_state;
 	
@@ -94,18 +96,15 @@ module frame_buffer #(
 		busy_r2 <= busy_r1; // second stage to ensure stability
 	end
 	
+	logic [X_WIDTH-1:0] read_x_r;
+	logic [Y_WIDTH-1:0] read_y_r;
 	always_ff @(posedge read_clk) begin
-	
-		if (busy_r2) begin
-			read_data <= '0;
-		end
-		
-		else begin // STATE = ON
-			if ((read_x < FB_WIDTH) && (read_y < FB_HEIGHT))
-				read_data <= mem[read_addr]; // pull pixel data from memory address and store it
-			else
-				read_data <= '0;
-		end
+		read_x_r <= read_x;
+    	read_y_r <= read_y;
+		mem_q   <= mem[read_addr];                              // pure RAM read
+		oob_r   <= ~((read_x_r < FB_WIDTH) && (read_y_r < FB_HEIGHT));
+		busy_r3 <= busy_r2;
+		read_data <= (busy_r3 | oob_r) ? '0 : mem_q;            // separate output mux
 	end
 	
 	always_ff @(posedge write_clk) begin
