@@ -145,7 +145,7 @@ module rasterizer #(
 	logic signed [31:0] e1, e2, e3;
 	logic [PIXEL_SIZE-1:0] mixed_color;
 
-    enum logic [0:0] { IDLE, SCAN } state, next_state;
+   enum logic [1:0] { IDLE, LOAD, SCAN } state, next_state;
 
 	logic next_write_en;
 	logic [X_WIDTH-1:0] next_write_x;
@@ -182,29 +182,33 @@ module rasterizer #(
                     next_v2 = vertex_data[127:64];
                     next_v3 = vertex_data[191:128];
 
-                    next_x_curr = x_min;
-                    next_y_curr = y_min;
-
-                    next_state = SCAN;
+                    next_state = LOAD;
                 end
             end
-
+				
+				// ---- LOAD ----
+				LOAD: begin // Allow time for values to load before processing
+					 next_x_curr = x_min;
+                next_y_curr = y_min;
+					 next_state = SCAN;
+				end
+				
             SCAN: begin
                 rast_ready = 1'b0;
 
-				if (!fb_busy) begin
-					if (y_curr > y_max) begin
-						next_state = IDLE;
+					if (!fb_busy) begin
+						if (y_curr > y_max) begin
+							next_state = IDLE;
+						end
+						else if(x_curr >= x_max) begin
+							next_x_curr = x_min;
+							next_y_curr = y_curr + 1;
+						end
+						else begin
+							next_x_curr = x_curr + 1;
+							next_y_curr = y_curr;
+						end
 					end
-					else if(x_curr >= x_max) begin
-						next_x_curr = x_min;
-						next_y_curr = y_curr + 1;
-					end
-					else begin
-						next_x_curr = x_curr + 1;
-						next_y_curr = y_curr;
-					end
-				end
             end
 
             default: next_state = IDLE;
@@ -213,7 +217,8 @@ module rasterizer #(
 		e1 = '0;
 		e2 = '0;
 		e3 = '0;
-
+		area = '0;
+		
 		area_n = '0;
 		e1_n = '0;
 		e2_n = '0;
