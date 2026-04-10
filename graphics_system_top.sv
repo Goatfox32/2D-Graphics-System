@@ -235,6 +235,7 @@ module graphics_system_top (
         .s1(s1),
         .hps_clear(rast_clear),
         .write_clk(clk50),
+        .v_counter(v_counter),
         .write_en(rast_write_en),
         .write_x(rast_write_x),
         .write_y(rast_write_y),

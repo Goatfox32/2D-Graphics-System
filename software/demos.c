@@ -14,6 +14,42 @@
 static unsigned char grid[GH][GW];
 static unsigned char next[GH][GW];
 
+
+static float verts[8][3] = {
+    {-1,-1,-1},{1,-1,-1},{1,1,-1},{-1,1,-1},
+    {-1,-1, 1},{1,-1, 1},{1,1, 1},{-1, 1, 1}
+};
+
+/* 6 faces as quad indices, each split into 2 tris */
+static int faces[6][4] = {
+    {0,1,2,3},{4,5,6,7},{0,1,5,4},
+    {2,3,7,6},{0,3,7,4},{1,2,6,5}
+};
+
+/* Per-face colors (r,g,b) in RGB565 range */
+static int facecolor[6][3] = {
+    {31,0,0},{0,63,0},{0,0,31},
+    {31,63,0},{31,0,31},{0,63,31}
+};
+
+static void project(float x, float y, float z, int *sx, int *sy) {
+    float d = 4.0f + z; /* simple perspective */
+    *sx = (int)(W/2 + x * 200.0f / d);
+    *sy = (int)(H/2 + y * 200.0f / d);
+}
+
+static void rotate(float *x, float *y, float *z, float ax, float ay) {
+    float t;
+    /* rotate Y */
+    t  = *x * cosf(ay) - *z * sinf(ay);
+    *z = *x * sinf(ay) + *z * cosf(ay);
+    *x = t;
+    /* rotate X */
+    t  = *y * cosf(ax) - *z * sinf(ax);
+    *z = *y * sinf(ax) + *z * cosf(ax);
+    *y = t;
+}
+
 static void seed_random(void) {
     for (int y = 0; y < GH; y++)
         for (int x = 0; x < GW; x++)
@@ -72,6 +108,48 @@ static void draw_cell(int gx, int gy, int r, int g, int b) {
     draw_triangle(x1, y0, r, g, b,
                   x1, y1, r, g, b,
                   x0, y1, r, g, b);
+}
+
+void spinning_cube_demo(int *exit) {
+    int frame = 0;
+    while (!*exit) {
+        clear();
+        float t = frame * 0.03f;
+        float ax = t * 0.7f, ay = t;
+
+        /* Transform vertices */
+        float rv[8][3];
+        int sv[8][2];
+        for (int i = 0; i < 8; i++) {
+            rv[i][0] = verts[i][0];
+            rv[i][1] = verts[i][1];
+            rv[i][2] = verts[i][2];
+            rotate(&rv[i][0], &rv[i][1], &rv[i][2], ax, ay);
+            project(rv[i][0], rv[i][1], rv[i][2], &sv[i][0], &sv[i][1]);
+        }
+
+        /* Draw faces — simple back-face cull via cross product */
+        for (int f = 0; f < 6; f++) {
+            int *q = faces[f];
+            /* Cross product of two edges in screen space */
+            int ax2 = sv[q[1]][0] - sv[q[0]][0];
+            int ay2 = sv[q[1]][1] - sv[q[0]][1];
+            int bx  = sv[q[2]][0] - sv[q[0]][0];
+            int by  = sv[q[2]][1] - sv[q[0]][1];
+            if (ax2 * by - ay2 * bx <= 0) continue; /* back-facing */
+
+            int *c = facecolor[f];
+            draw_triangle(sv[q[0]][0], sv[q[0]][1], c[0], c[1], c[2],
+                          sv[q[1]][0], sv[q[1]][1], c[0], c[1], c[2],
+                          sv[q[2]][0], sv[q[2]][1], c[0], c[1], c[2]);
+            draw_triangle(sv[q[2]][0], sv[q[2]][1], c[0], c[1], c[2],
+                          sv[q[3]][0], sv[q[3]][1], c[0], c[1], c[2],
+                          sv[q[0]][0], sv[q[0]][1], c[0], c[1], c[2]);
+        }
+
+        frame++;
+        usleep(33000);
+    }
 }
 
 void game_of_life_demo(int *exit) {
@@ -144,6 +222,6 @@ void spinning_triangles_demo(int *exit) {
         }
 
         frame++;
-        usleep(330000); /* ~30 fps */
+        usleep(33000); /* ~30 fps */
     }
 }
