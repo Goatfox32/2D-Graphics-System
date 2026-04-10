@@ -255,7 +255,7 @@ module rasterizer #(
 			
 			// Color mixing calculation
 			if (pixel_valid) begin
-				/*
+				
 				r_num = e2_n * $signed({1'b0, r1}) +
 						  e3_n * $signed({1'b0, r2}) +
 						  e1_n * $signed({1'b0, r3});
@@ -271,8 +271,8 @@ module rasterizer #(
 				r_mix = r_num / area_n;
 				g_mix = g_num / area_n;
 				b_mix = b_num / area_n;
-				*/
-				mixed_color = {r1[4:3], g1[5:4], b1[4:3]};
+				
+				mixed_color = {r_mix[4:3], g_mix[5:4], b_mix[4:3]};
 			end
 		end
 
