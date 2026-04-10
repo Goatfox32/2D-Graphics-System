@@ -93,17 +93,21 @@ module rasterizer #(
 	logic [X_WIDTH-1:0] x_max, x_min, x_curr, next_x_curr;
 	logic [Y_WIDTH-1:0] y_max, y_min, y_curr, next_y_curr;
 
+	// --- Edge test calculations
+	logic pixel_valid;
+
+	logic signed [31:0] area;
+	logic        [31:0] area_n, next_area_n;
+
+	logic signed [31:0] e1, e2, e3;
+	logic 		 [31:0] e1_n, e2_n, e3_n, next_e1_n, next_e2_n, next_e3_n;
+
 	// --- Color registers
 	logic [4:0] r1, r2, r3, r_mix;
 	logic [5:0] g1, g2, g3, g_mix;
 	logic [4:0] b1, b2, b3, b_mix;
 
-	// --- 
-	logic pixel_valid;
-	logic signed [31:0] area, next_area_n, area_n;
-	logic signed [31:0] e1_n, e2_n, e3_n;
 	logic signed [47:0] r_num, g_num, b_num;
-	logic signed [31:0] e1, e2, e3;
 	logic [PIXEL_SIZE-1:0] mixed_color;
 
     enum logic [2:0] { IDLE, LOAD_TRIANGLE, CALC_RECIP, LOAD_SPRITE, SCAN_TRIANGLE, SCAN_SPRITE } state, next_state;
@@ -155,6 +159,10 @@ module rasterizer #(
 			v2 <= '0;
 			v3 <= '0;
 
+			e1_n <= '0;
+			e2_n <= '0;
+			e3_n <= '0;
+
 			x_curr <= x_min;
 			y_curr <= y_min;
 			sprite_reg <= '0;
@@ -169,6 +177,10 @@ module rasterizer #(
 			v1 <= next_v1;
 			v2 <= next_v2;
 			v3 <= next_v3;
+
+			e1_n <= next_e1_n;
+			e2_n <= next_e2_n;
+			e3_n <= next_e3_n;
 
 			sprite_reg <= next_sprite_reg;
 			
@@ -310,6 +322,7 @@ module rasterizer #(
 					pixel_valid = 1;
 				
 				// Color mixing calculation
+				// Reposition this later
 				if (pixel_valid) begin
 					
 					r_num = e2_n * $signed({1'b0, r1}) +
