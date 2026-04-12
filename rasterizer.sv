@@ -292,7 +292,6 @@ module rasterizer #(
         case (state)
             IDLE: begin
                 next_rast_ready = 1'b1;
-				next_fb_hold_n = 1'b1;
 
                 if (vertex_valid) begin
                     next_v1 = vertex_data[63:0];
@@ -390,6 +389,7 @@ module rasterizer #(
 					next_fb_hold_n = 1'b0;
 					if (y_curr > y_max) begin
 						next_state = IDLE;
+						next_fb_hold_n = 1'b1;
 					end
 					else if(x_curr >= x_max) begin
 						next_x_curr = x_min;
@@ -434,6 +434,7 @@ module rasterizer #(
 					next_fb_hold_n = 1'b0;
 					if (y_curr > sprite_y_max) begin
 						next_state = IDLE;
+						next_fb_hold_n = 1'b1;
 					end
 					else if (x_curr >= sprite_x_max) begin
 						next_x_curr = sprite_x;
