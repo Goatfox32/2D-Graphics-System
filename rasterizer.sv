@@ -287,7 +287,7 @@ module rasterizer #(
 		b_mix = '0;
 		mixed_color = '0;
 
-		next_fb_hold_n = fb_hold_n;
+		next_fb_hold_n = 1'b0;
 
         case (state)
             IDLE: begin
