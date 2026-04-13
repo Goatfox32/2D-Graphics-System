@@ -90,6 +90,16 @@ uint8_t read_status() {
 
 void clear() {
     send_command(0x01, NULL, 1);
+    send_command(0x00, NULL, 1); // Test out NOP
+
+    /* Draw entire screen black ??
+    draw_triangle(0,     0, 0,  0,  0,
+                  319,   0, 0,  0,  0,
+                  0,   239, 0,  0,  0);
+    draw_triangle(239, 319, 0,  0,  0,
+                  329,   0, 0,  0,  0,
+                  0,   239, 0,  0,  0);
+    */
 }
 
 // Do NOT use (not implemented in command processor)

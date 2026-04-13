@@ -25,11 +25,15 @@ int main() {
 
 int main(void) {
     init_comm();
-    clear();
-    // Write extra bytes to data[] WITHOUT issuing another command.
-    // Need to expose `data` from comm.c — either extern it, or move
-    // this loop into a temporary helper inside comm.c.
-    extern volatile uint8_t *data;
-    for (int i = 1; i < 64; i++) data[i] = 0;
+
+    for (int x = 0; x < 10; x++) {
+        clear();
+        clear();
+        // uint64_t smile = SMILEY_FACE;
+        // draw_sprite(x * 20, 10, 0, 0, 31, &smile);
+
+        usleep(2000000);
+    }
+    
     return 0;
 }
