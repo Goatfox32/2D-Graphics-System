@@ -36,38 +36,39 @@ module vga_timing #(
   
   
 	always_ff @(posedge clk_div) begin
-    if (~s1) begin
-        h_counter <= '0;
-        v_counter <= '0;
-        h_pulse   <= 1'b0;
-        v_pulse   <= 1'b0;
-    end
-	 
-    else begin
-	 
-		  // ----- H Sync -----
-        h_counter <= h_counter + 1'b1;
+		if (~s1) begin
+			h_counter <= '0;
+			v_counter <= '0;
+			h_pulse   <= 1'b0;
+			v_pulse   <= 1'b0;
+		end
+		
+		else begin
+		
+			// ----- H Sync -----
 
-        if ((h_counter >= 656) && (h_counter < 752))
-            h_pulse <= 1'b1;
-        else
-            h_pulse <= 1'b0;
-				
-		  // ----- V Sync -----
+			if ((h_counter >= 656) && (h_counter < 752))
+				h_pulse <= 1'b1;
+			else
+				h_pulse <= 1'b0;
+					
+			// ----- V Sync -----
 
-        if (h_counter == H_SYNC_MAX - 1) begin
-            h_counter <= '0;
-            v_counter <= v_counter + 1'b1;
-        end
+			if (h_counter == H_SYNC_MAX - 1) begin
+				h_counter <= '0;
+				v_counter <= v_counter + 1'b1;
+			end else begin
+				h_counter <= h_counter + 1'b1;
+			end
 
-        if ((v_counter >= 490) && (v_counter < 492))
-            v_pulse <= 1'b1;
-        else
-            v_pulse <= 1'b0;
+			if ((v_counter >= 490) && (v_counter < 492))
+				v_pulse <= 1'b1;
+			else
+				v_pulse <= 1'b0;
 
-        if (v_counter == V_SYNC_MAX - 1)
-            v_counter <= '0;
-    end
+			if (v_counter == V_SYNC_MAX - 1)
+				v_counter <= '0;
+		end
 	end
 	
 	assign visible = (h_counter < 640) && (v_counter < 480);
