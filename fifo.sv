@@ -12,11 +12,12 @@ module fifo (
 
     input  logic [63:0] data_in,
     input  logic        write_en,
+    output logic        full,
+    output logic [4:0]  count,
+
     output logic [63:0] data_out,
     input  logic        read_en,
-    output logic        empty,
-    output logic [4:0]  count,
-    output logic        full
+    output logic        empty
 );
 
     logic [63:0] fifo_mem [0:15]; // 16-entry storage array

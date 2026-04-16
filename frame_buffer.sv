@@ -22,7 +22,7 @@ module frame_buffer #(
 	input logic read_clk,
 	input logic write_clk,
 	input logic hps_clear,
-	input logic s1,
+	input logic reset_n,
 	input logic [$clog2(V_SYNC_MAX)-1:0] v_counter,
 	input logic write_en, // flag to allow data to be written
 	input logic [X_WIDTH-1:0] write_x, // x position of pixel
@@ -34,8 +34,8 @@ module frame_buffer #(
 	output logic [PIXEL_SIZE-1:0] read_data, // store pixel data
 	output logic busy
 );
-	logic s1_w1, s1_w2, s1_w2_d; // 3-stage synchronizer for reset button (s1) into write_clk domain
-	logic clear_req;             // Pulse generated on falling edge of synchronized s1
+	logic reset_n_w1, reset_n_w2, reset_n_w2_d; // 3-stage synchronizer for reset_n into write_clk domain
+	logic clear_req;             // Pulse generated on falling edge of synchronized reset
 
 	logic [PIXEL_SIZE-1:0] mem_A_q, mem_B_q; // Registered RAM outputs (one cycle latency)
 	logic oob_r;                              // Registered out-of-bounds flag for read coordinates
@@ -70,9 +70,9 @@ module frame_buffer #(
 		last_state = OUTPUT_A;
       clear_addr = '0;
       read_data = '0;
-		s1_w1 = 1'b1;
-		s1_w2 = 1'b1;
-		s1_w2_d = 1'b1;
+		reset_n_w1 = 1'b1;
+		reset_n_w2 = 1'b1;
+		reset_n_w2_d = 1'b1;
 		display_sel_w  = 1'b0; // start displaying frame A
 		display_sel_r1 = 1'b0;
 		display_sel_r2 = 1'b0;
@@ -139,15 +139,15 @@ module frame_buffer #(
 	end
 	
 	// ---- BUTTON / HPS CLEAR SYNCHRONIZATION ----
-	// Synchronize (s1 AND NOT hps_clear) into the write_clk domain;
+	// Synchronize (reset AND NOT hps_clear) into the write_clk domain;
 	// a falling edge produces a one-cycle clear_req pulse.
 	always_ff @(posedge write_clk) begin
-		s1_w1   <= s1 & (~hps_clear);
-		s1_w2   <= s1_w1;
-		s1_w2_d <= s1_w2;
+		reset_n_w1   <= reset_n & (~hps_clear);
+		reset_n_w2   <= reset_n_w1;
+		reset_n_w2_d <= reset_n_w2;
 	end
 
-	assign clear_req = s1_w2_d & ~s1_w2; // Falling-edge detect
+	assign clear_req = reset_n_w2_d & ~reset_n_w2; // Falling-edge detect
 	
 	
 	// ---- FRAME SWAP SYNCHRONIZATION ----

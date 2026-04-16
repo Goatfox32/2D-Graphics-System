@@ -16,7 +16,7 @@ module vga_timing #(
 )
 (
 	input logic clk50,
-	input logic s1,
+	input logic reset_n,
 	input logic [5:0] pixel_in,
 	output logic clk_div,
 	output logic [7:0] GPIO_0,
@@ -45,7 +45,7 @@ module vga_timing #(
   
   
 	always_ff @(posedge clk_div) begin
-		if (~s1) begin
+		if (~reset_n) begin
 			h_counter <= '0;
 			v_counter <= '0;
 			h_pulse   <= 0;

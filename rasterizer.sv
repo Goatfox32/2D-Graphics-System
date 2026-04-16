@@ -27,15 +27,14 @@ module rasterizer #(
 )
 (
 	input  logic clk,
-	input  logic s1,
+	input  logic reset_n,
 	
 	output logic rast_ready,
 
-	input  logic [191:0] vertex_data,
     input  logic 		 vertex_valid,
-	 		  
-	input  logic [127:0] sprite_data,
+	input  logic [191:0] vertex_data,
 	input  logic 		 sprite_valid,
+	input  logic [127:0] sprite_data,
 
 	output logic 		 	      write_en,
 	output logic [X_WIDTH-1:0]    write_x,
@@ -196,7 +195,7 @@ module rasterizer #(
 
 	// --- Sequential logic
 	always_ff @(posedge clk) begin
-		if (~s1) begin // Reset state
+		if (~reset_n) begin // Reset state
 			v1 <= '0;
 			v2 <= '0;
 			v3 <= '0;

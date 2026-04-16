@@ -152,6 +152,10 @@ module graphics_system_top (
     end
     wire system_reset_n = (reset_counter >= 27'd50_000_000);
 
+    // ==========================================
+    // Modules
+    // ==========================================
+
     command_reader cmd_reader (
         .clk            (clk50),
         .reset_n        (system_reset_n),
@@ -236,11 +240,13 @@ module graphics_system_top (
         .Y_WIDTH    (Y_WIDTH)
 	) rast_u (
         .clk          (clk50),
-        .s1           (s1),
+        .reset_n      (s1),
 
         .rast_ready   (rast_ready),
+
         .vertex_data  (vertex_data),
         .vertex_valid (vertex_valid),
+
         .sprite_data  (sprite_data),
         .sprite_valid (sprite_valid),
 
@@ -262,7 +268,7 @@ module graphics_system_top (
         .read_clk   (vga_clk),
         .write_clk  (clk50),
         .hps_clear  (fb_clear),
-        .s1         (s1),
+        .reset_n    (s1),
         .v_counter  (v_counter),
         .write_en   (rast_write_en),
         .write_x    (rast_write_x),
@@ -277,7 +283,7 @@ module graphics_system_top (
 
     vga_timing vga_u (
         .clk50(clk50),
-        .s1(s1),
+        .reset_n(s1),
         .pixel_in(fb_read_data),
         .clk_div(vga_clk),
         .GPIO_0(GPIO_0[7:0]),
