@@ -6,8 +6,6 @@
 // Dispatches clear, present, draw_triangle, and draw_sprite operations to the frame buffer
 // and rasterizer. Waits for the rasterizer to be ready before issuing draw commands.
 
-`default_nettype none
-
 module command_executer (
     input  logic         clk,
     input  logic         reset_n,

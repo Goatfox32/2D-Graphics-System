@@ -6,7 +6,6 @@
 // them into two FIFOs: a command FIFO (opcode only) and a data FIFO (vertex/sprite payloads).
 // When busy is high, the module will not accept new commands and sets the status bit accordingly.
 
-`default_nettype none
 module command_reader (
     input  logic         clk,
     input  logic         reset_n,

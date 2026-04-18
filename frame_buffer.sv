@@ -42,7 +42,7 @@ module frame_buffer #(
 	
 	logic [PIXEL_SIZE-1:0] mem_A [0:SIZE-1]; // Pixel storage for buffer A (76,800 entries)
 	logic [PIXEL_SIZE-1:0] mem_B [0:SIZE-1]; // Pixel storage for buffer B (76,800 entries)
-   logic [ADDR_W-1:0] write_addr, read_addr, clear_addr, next_clear_addr;
+    logic [ADDR_W-1:0] write_addr, read_addr, clear_addr, next_clear_addr;
 
 	// --- Display buffer select, synchronized from write_clk to read_clk domain
 	logic display_sel_w;               // Write-domain: which buffer is being displayed (0=A, 1=B)
@@ -68,8 +68,8 @@ module frame_buffer #(
 	initial begin
 		state = CLEAR;
 		last_state = OUTPUT_A;
-      clear_addr = '0;
-      read_data = '0;
+		clear_addr = '0;
+		read_data = '0;
 		reset_n_w1 = 1'b1;
 		reset_n_w2 = 1'b1;
 		reset_n_w2_d = 1'b1;
