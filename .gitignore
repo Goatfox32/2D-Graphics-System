@@ -11,3 +11,4 @@ obj_dir/
 wavestate.*
 temp/
 legacy/
+Makefile
