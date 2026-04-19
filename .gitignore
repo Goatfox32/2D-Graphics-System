@@ -1,4 +1,4 @@
-Makefile
+./Makefile
 build/
 graphics_system.qsf.bak
 db/
