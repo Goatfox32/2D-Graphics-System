@@ -1,2 +1,584 @@
-# 2D-Graphics-System
-A custom 3D graphics system for the DE0-Nano-SoC that splits work between the HPS and FPGA. The HPS handles game logic, input, and vertex transforms, while the FPGA performs triangle rasterization, Z-buffering, framebuffer updates, and video output to render a real-time 320x240 game.
+# 2D Graphics System
+
+A hardware-accelerated 2D graphics system built for the **Atlas / DE0-Nano-SoC**. The project uses the ARM **Hard Processor System (HPS)** to run a simple C graphics API, while the **FPGA fabric** handles command decoding, triangle rasterization, sprite rendering, double buffering, and VGA output.
+
+The goal of the project is to hide the low-level hardware details behind a small software interface. A user can draw graphics using simple C functions like `draw_triangle()`, `draw_sprite()`, `clear()`, and `present_frame()`.
+
+---
+
+## Demo Video
+
+Put the main demo video here near the top so visitors can see the project working without reading the full README.
+
+Replace the link below with your YouTube, Google Drive, OneDrive, or GitHub video link.
+
+```md
+[Watch the 2D Graphics System Demo](https://your-demo-video-link-here)
+```
+
+Recommended version with a clickable thumbnail:
+
+```md
+[![2D Graphics System Demo](docs/images/demo-thumbnail.png)](https://your-demo-video-link-here)
+```
+
+When you add your real video, it should look something like this:
+
+[Watch the 2D Graphics System Demo](https://your-demo-video-link-here)
+
+---
+
+## Demo Output
+
+Place your demo photos in:
+
+```text
+docs/images/
+```
+
+Then replace the placeholder filenames below with your actual image filenames.
+
+### Demo 1: Command Set Demonstration
+
+This demo shows the main graphics commands, including triangles, sprites, transparent sprite rendering, and the 64-colour output grid.
+
+```md
+![Demo 1: command set demonstration]<img width="474" height="499" alt="image" src="https://github.com/user-attachments/assets/cb666762-2f3c-4683-bae2-857028a9e13e" />
+
+```
+
+### Demo 2: Spinning Cube
+
+This demo uses animated triangles to create a simple rotating cube effect.
+
+```md
+![Demo 2: spinning cube]<img width="975" height="563" alt="image" src="https://github.com/user-attachments/assets/52249a5b-a392-4dac-bea0-e0ac45b49dfa" />
+
+```
+
+### Demo 3: Bouncing DVD Logo
+
+This demo shows sprite rendering and simple animation.
+
+```md
+![Demo 3: bouncing DVD logo]<img width="975" height="550" alt="image" src="https://github.com/user-attachments/assets/68d81b28-0c7d-4d87-a00e-d0653612dd73" />
+
+```
+
+### Demo 4: Conway's Game of Life
+
+This demo shows repeated frame updates and many small pixel/sprite-style changes across the screen.
+
+```md
+![Demo 4: Conway's Game of Life](docs/images/demo-4-game-of-life.png)
+```
+
+![Demo 4: Conway's Game of Life](docs/images/demo-4-game-of-life.png)
+
+### Demo 5: Moving Triangles
+
+This demo shows multiple triangles moving and rotating on the VGA display.
+
+```md
+![Demo 5: moving and spinning triangles](docs/images/demo-5-moving-triangles.png)
+```
+
+![Demo 5: moving and spinning triangles](docs/images/demo-5-moving-triangles.png)
+
+---
+
+## Features
+
+- Hardware rasterization of filled 2D triangles
+- 8x8 monochrome sprite rendering
+- Transparent sprite behaviour where unset sprite pixels do not overwrite the background
+- Double-buffered frame buffer to reduce visible tearing
+- VGA output using 640x480 timing
+- 320x240 internal graphics resolution
+- 64-colour output using 6-bit RGB colour data
+- HPS-to-FPGA command interface using shared SDRAM and lightweight bridge registers
+- FIFO-backed command interpreter for buffered command handling
+- Simple C software library for drawing graphics from Linux on the HPS
+
+---
+
+## System Overview
+
+The system is split into two major parts:
+
+1. **Software on the HPS**
+   - Runs C code under Linux.
+   - Provides simple drawing functions.
+   - Packs commands into binary command packets.
+   - Writes command data into shared SDRAM.
+   - Signals the FPGA through memory-mapped registers.
+
+2. **Hardware on the FPGA**
+   - Reads command packets from SDRAM.
+   - Decodes command opcodes.
+   - Rasterizes triangles and sprites.
+   - Writes pixel data into the back buffer.
+   - Sends the front buffer to the VGA output path.
+
+### System Block Diagram
+
+Put your main full-system block diagram here. This should show how the HPS, command reader, command executer, FIFOs, rasterizer, frame buffer, and VGA controller connect.
+
+```md
+![System block diagram](docs/images/system-block-diagram.png)
+```
+
+![System block diagram](docs/images/system-block-diagram.png)
+
+---
+
+## Hardware and Software Stack
+
+| Layer | Technology / Module | Purpose |
+|---|---|---|
+| User program | C | Calls simple graphics functions |
+| Software library | `comm.c`, `comm.h` | Packs commands and communicates with FPGA |
+| Processor system | HPS Linux | Runs the user program |
+| Communication path | LWH2F bridge + shared SDRAM | Moves command data from HPS to FPGA |
+| Command interpreter | `command_reader.sv`, `command_executer.sv`, `fifo.sv` | Reads, buffers, and decodes commands |
+| Rasterizer | `rasterizer.sv` | Converts draw commands into pixel writes |
+| Frame buffer | `frame_buffer.sv` | Stores front/back pixel buffers |
+| Video output | `vga_timing.sv` | Generates VGA timing and display output |
+
+---
+
+## C Graphics API
+
+The user-facing API is intentionally small.
+
+```c
+void init_comm();
+
+void clear();
+
+void present_frame();
+
+void draw_triangle(
+    int x1, int y1, int r1, int g1, int b1,
+    int x2, int y2, int r2, int g2, int b2,
+    int x3, int y3, int r3, int g3, int b3
+);
+
+void draw_sprite(
+    int x,
+    int y,
+    int r,
+    int g,
+    int b,
+    uint64_t *texture
+);
+```
+
+### Minimal Example
+
+```c
+#include "comm.h"
+
+int main(void) {
+    init_comm();
+
+    clear();
+
+    draw_triangle(
+        130, 100, 31, 63, 31,
+        190, 100, 31, 63, 31,
+        160, 150, 31, 63, 31
+    );
+
+    present_frame();
+
+    return 0;
+}
+```
+
+### Basic Animation Structure
+
+```c
+#include "comm.h"
+
+int main(void) {
+    init_comm();
+
+    while (1) {
+        clear();
+
+        // Draw the next frame here
+        draw_triangle(
+            40, 40, 31, 0, 0,
+            120, 40, 31, 0, 0,
+            80, 120, 31, 0, 0
+        );
+
+        present_frame();
+    }
+
+    return 0;
+}
+```
+
+---
+
+## Command Interface
+
+The HPS sends graphics commands to the FPGA using shared SDRAM and lightweight bridge registers.
+
+### Command Flow
+
+1. The HPS writes a command packet into SDRAM.
+2. The HPS writes the command address and command size into FPGA-visible registers.
+3. The HPS pulses the start register.
+4. The FPGA command reader fetches the command from SDRAM.
+5. The command opcode is stored in the command FIFO.
+6. The command data is stored in the data FIFO.
+7. The command executer decodes the command.
+8. The rasterizer or frame buffer performs the requested operation.
+
+### Command Flow Diagram
+
+Put a command-flow diagram here if you have one. This is a good place to show how a C function call turns into an FPGA operation.
+
+```md
+![HPS to FPGA command flow](docs/images/command-flow-diagram.png)
+```
+
+![HPS to FPGA command flow](docs/images/command-flow-diagram.png)
+
+---
+
+## Supported Commands
+
+| Command | Opcode | Description |
+|---|---:|---|
+| `CLEAR` | `0x01` | Clears the back buffer to black |
+| `PRESENT_FRAME` | `0x02` | Requests a front/back buffer swap |
+| `DRAW_TRIANGLE` | `0x03` | Draws a filled triangle using three vertices |
+| `DRAW_SPRITE` | `0x04` | Draws an 8x8 single-colour sprite |
+
+---
+
+## Coordinate and Colour Format
+
+The internal graphics resolution is:
+
+```text
+320 x 240 pixels
+```
+
+The VGA controller uses standard 640x480 timing, so each internal pixel is displayed as a 2x2 block.
+
+The frame buffer stores 6-bit colour data:
+
+```text
+{ red[1:0], green[1:0], blue[1:0] }
+```
+
+The software API accepts colour values using the packed vertex format:
+
+```text
+red:   0-31
+green: 0-63
+blue:  0-31
+```
+
+The current VGA output hardware reduces this to the available 6-bit RGB output.
+
+---
+
+## Command Interpreter
+
+The command interpreter is responsible for getting commands from the HPS into the hardware graphics pipeline.
+
+It is made of four main pieces:
+
+- `command_reader.sv`
+- `command_executer.sv`
+- command FIFO
+- data FIFO
+
+### Command Reader Diagram
+
+```md
+![Command reader block diagram]<img width="722" height="496" alt="image" src="https://github.com/user-attachments/assets/8d5db45f-582b-4aa3-8f91-a07e3e6b070c" />
+
+
+```
+
+### Command Executer Diagram
+
+```md
+![Command executer block diagram]<img width="754" height="368" alt="image" src="https://github.com/user-attachments/assets/157c6981-e6e3-41a7-9b94-bec88192e5ee" />
+
+```
+
+### FIFO Diagram
+
+```md
+![FIFO block diagram]<img width="578" height="286" alt="image" src="https://github.com/user-attachments/assets/f6e72aa0-2995-4127-a166-9245584e5e62" />
+
+```
+---
+
+## Rasterizer
+
+The rasterizer converts draw commands into pixel write requests for the frame buffer.
+
+It supports two draw paths:
+
+1. Filled triangles
+2. 8x8 sprites
+
+### Rasterizer Block Diagram
+
+```md
+![Rasterizer block diagram]<img width="688" height="381" alt="image" src="https://github.com/user-attachments/assets/c5f3f95c-d578-4428-84ab-b15447c3375a" />
+
+```
+
+### Triangle Rasterization
+
+Triangle drawing works by:
+
+1. Loading three packed vertices.
+2. Computing a bounding box around the triangle.
+3. Computing edge equations for each triangle side.
+4. Scanning pixels inside the bounding box.
+5. Writing pixels that pass the inside-triangle test.
+
+The rasterizer currently uses **flat shading**. The software function accepts separate colours for all three vertices, but the current hardware uses the first vertex colour for the entire triangle.
+
+### Sprite Rendering
+
+Sprites are represented as 8x8, 1-bit-per-pixel patterns stored in a 64-bit value.
+
+- A `1` bit means the pixel is drawn.
+- A `0` bit means no write occurs.
+
+This naturally creates transparency because unset sprite pixels do not overwrite the existing background.
+
+---
+
+## Frame Buffer
+
+The frame buffer stores the pixel data that is shown on the monitor. It uses a double-buffered design:
+
+- The **front buffer** is read by the VGA output path.
+- The **back buffer** is written by the rasterizer.
+
+When `present_frame()` is called, the system requests a buffer swap. The swap is delayed until the VGA vertical blanking interval so that the visible frame does not change halfway through being drawn.
+
+### Frame Buffer Block Diagram
+
+```md
+![Frame buffer block diagram]<img width="685" height="490" alt="image" src="https://github.com/user-attachments/assets/9c4eecf0-2cdc-43a7-b510-08457864a348" />
+
+```
+---
+
+## VGA Output
+
+The VGA controller generates the timing signals needed to display the frame buffer contents on a monitor.
+
+The project uses 640x480 VGA timing at 60 Hz, while the internal graphics resolution is 320x240. Each internal pixel is scaled to a 2x2 block on the VGA display.
+
+### VGA Timing Diagram
+
+```md
+![VGA timing diagram]<img width="545" height="378" alt="image" src="https://github.com/user-attachments/assets/3e47f5e7-1c36-4896-b664-128239543845" />
+
+```
+
+### VGA Wiring or Resistor Divider Diagram
+
+```md
+![VGA resistor divider circuit]<img width="474" height="499" alt="image" src="https://github.com/user-attachments/assets/fa8cd064-35ee-49c6-adf8-f4d1a76d44bb" />
+
+```
+---
+
+## Hardware Setup
+
+Put a photo of the physical project setup here. This is useful for showing the board, wiring, VGA connector, and monitor.
+
+```md
+![Hardware setup](docs/images/hardware-setup.png)
+```
+
+![Hardware setup](docs/images/hardware-setup.png)
+
+Recommended photo contents:
+
+- Atlas / DE0-Nano-SoC board
+- VGA wiring or output connector
+- Monitor displaying one of the demos
+- Any keyboard, buttons, or serial connection used to control the demo
+
+---
+
+## Repository Layout
+
+Suggested repository structure:
+
+```text
+.
+├── README.md
+├── hardware/
+│   ├── graphics_system_top.sv
+│   ├── command_reader.sv
+│   ├── command_executer.sv
+│   ├── fifo.sv
+│   ├── rasterizer.sv
+│   ├── frame_buffer.sv
+│   ├── vga_timing.sv
+│   └── graphics_system.tcl
+│
+├── software/
+│   ├── comm.c
+│   ├── comm.h
+│   └── sprites.h
+│
+├── demos/
+│   ├── main.c
+│   ├── demos.c
+│   ├── demos.h
+│   ├── benchmarks.c
+│   ├── benchmarks.h
+│   ├── input.c
+│   ├── input.h
+│   ├── config.h
+│   └── Makefile
+│
+└── docs/
+    └── images/
+        ├── demo-thumbnail.png
+        ├── demo-1-command-set.png
+        ├── demo-2-spinning-cube.png
+        ├── demo-3-dvd-logo.png
+        ├── demo-4-game-of-life.png
+        ├── demo-5-moving-triangles.png
+        ├── system-block-diagram.png
+        ├── command-flow-diagram.png
+        ├── command-reader-diagram.png
+        ├── command-executer-diagram.png
+        ├── fifo-diagram.png
+        ├── rasterizer-diagram.png
+        ├── frame-buffer-diagram.png
+        ├── double-buffering-diagram.png
+        ├── vga-timing-diagram.png
+        ├── vga-resistor-divider.png
+        └── hardware-setup.png
+```
+
+You do not need every image listed above. The strongest ones to include are:
+
+1. Demo video thumbnail
+2. Main system block diagram
+3. Rasterizer diagram
+4. Frame buffer diagram
+5. Demo output photos
+
+---
+
+## Building the Hardware
+
+The hardware system was built using Intel / Altera FPGA tools for the Cyclone V SoC platform.
+
+General hardware build flow:
+
+1. Open the Quartus project.
+2. Generate or update the Qsys / Platform Designer system using `graphics_system.tcl`.
+3. Compile the Quartus project.
+4. Convert the compiled FPGA bitstream to `.rbf` format.
+5. Copy the generated `.rbf` file to the SD card as:
+
+```text
+graphics_system.rbf
+```
+
+The HPS boot script loads this file into the FPGA during boot.
+
+---
+
+## HPS Boot Setup
+
+A Terasic Linux image was used for the HPS. The image required two major changes:
+
+1. Replace the image preloader with the preloader generated for the custom hardware system.
+2. Modify the boot script so that the FPGA is programmed during boot.
+
+Example boot-script commands:
+
+```bash
+fatload mmc 0:1 $fpgadata graphics_system.rbf
+fpga load 0 $fpgadata $filesize
+run bridge_enable_handoff
+run mmcload
+run mmcboot
+```
+
+---
+
+## Building the Demo Software
+
+On the HPS Linux system, compile the demo software using the provided `Makefile`.
+
+```bash
+make
+```
+
+Run the executable:
+
+```bash
+sudo ./main
+```
+
+Root permissions may be required because the software library maps physical memory through `/dev/mem`.
+
+---
+
+## Known Limitations
+
+- Triangle colour interpolation is not fully implemented.
+- The current triangle rasterizer uses the first vertex colour for the whole triangle.
+- Sprites are fixed at 8x8 pixels.
+- Sprites are single-colour.
+- The internal resolution is fixed at 320x240.
+- VGA colour output is limited to 6-bit RGB.
+- The command interface depends on fixed memory-mapped addresses, so the software and hardware address maps must match.
+
+---
+
+## Future Improvements
+
+Possible improvements include:
+
+- Barycentric colour interpolation for smooth triangle shading
+- Z-buffering for depth-aware rendering
+- Line, rectangle, and polygon draw commands
+- Larger sprites
+- Multi-colour sprites
+- Higher internal resolution
+- More efficient clear/fill operations
+- More robust command packet formatting
+- A larger graphics API built on top of the current low-level functions
+
+---
+
+## Authors
+
+- Braden Vanderwoerd
+- Jacob Edwards
+
+Created for **ELEX 7660**.
+
+---
+
+## References
+
+- Alice 4 FPGA Rasterizer by Brad Grantham and Lawrence Kesteloot
+- Two-Dimensional Graphics Card (GPU) on an Altera FPGA by Peter Alexander Greczner
+- VGA timing and connector reference material from VESA and VGA pinout documentation
