@@ -10,7 +10,7 @@ The goal of the project is to hide the low-level hardware details behind a small
 
 Watch the project demo here:
 
-[2D Graphics System Demo Video]([https://your-demo-video-link-here](https://youtu.be/XFwkRuyKpXk))
+[2D Graphics System Demo Video](https://youtu.be/XFwkRuyKpXk)
 
 ---
 
