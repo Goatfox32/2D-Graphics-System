@@ -8,82 +8,43 @@ The goal of the project is to hide the low-level hardware details behind a small
 
 ## Demo Video
 
-Put the main demo video here near the top so visitors can see the project working without reading the full README.
+Watch the project demo here:
 
-Replace the link below with your YouTube, Google Drive, OneDrive, or GitHub video link.
-
-```md
-[Watch the 2D Graphics System Demo](https://your-demo-video-link-here)
-```
-
-Recommended version with a clickable thumbnail:
-
-```md
-[![2D Graphics System Demo](docs/images/demo-thumbnail.png)](https://your-demo-video-link-here)
-```
-
-When you add your real video, it should look something like this:
-
-[Watch the 2D Graphics System Demo](https://your-demo-video-link-here)
+[2D Graphics System Demo Video]([https://your-demo-video-link-here](https://youtu.be/XFwkRuyKpXk))
 
 ---
 
 ## Demo Output
 
-Place your demo photos in:
-
-```text
-docs/images/
-```
-
-Then replace the placeholder filenames below with your actual image filenames.
-
 ### Demo 1: Command Set Demonstration
 
 This demo shows the main graphics commands, including triangles, sprites, transparent sprite rendering, and the 64-colour output grid.
 
-```md
-![Demo 1: command set demonstration]<img width="474" height="499" alt="image" src="https://github.com/user-attachments/assets/cb666762-2f3c-4683-bae2-857028a9e13e" />
-
-```
+![Demo 1: command set demonstration](images/demo-1-command-set.png)
 
 ### Demo 2: Spinning Cube
 
 This demo uses animated triangles to create a simple rotating cube effect.
 
-```md
-![Demo 2: spinning cube]<img width="975" height="563" alt="image" src="https://github.com/user-attachments/assets/52249a5b-a392-4dac-bea0-e0ac45b49dfa" />
-
-```
+![Demo 2: spinning cube](images/demo-2-spinning-cube.png)
 
 ### Demo 3: Bouncing DVD Logo
 
 This demo shows sprite rendering and simple animation.
 
-```md
-![Demo 3: bouncing DVD logo]<img width="975" height="550" alt="image" src="https://github.com/user-attachments/assets/68d81b28-0c7d-4d87-a00e-d0653612dd73" />
-
-```
+![Demo 3: bouncing DVD logo](images/demo-3-dvd-logo.png)
 
 ### Demo 4: Conway's Game of Life
 
 This demo shows repeated frame updates and many small pixel/sprite-style changes across the screen.
 
-```md
-![Demo 4: Conway's Game of Life](docs/images/demo-4-game-of-life.png)
-```
-
-![Demo 4: Conway's Game of Life](docs/images/demo-4-game-of-life.png)
+![Demo 4: Conway's Game of Life](images/demo-4-game-of-life.png)
 
 ### Demo 5: Moving Triangles
 
 This demo shows multiple triangles moving and rotating on the VGA display.
 
-```md
-![Demo 5: moving and spinning triangles](docs/images/demo-5-moving-triangles.png)
-```
-
-![Demo 5: moving and spinning triangles](docs/images/demo-5-moving-triangles.png)
+![Demo 5: moving and spinning triangles](images/demo-5-moving-triangles.png)
 
 ---
 
@@ -122,13 +83,9 @@ The system is split into two major parts:
 
 ### System Block Diagram
 
-Put your main full-system block diagram here. This should show how the HPS, command reader, command executer, FIFOs, rasterizer, frame buffer, and VGA controller connect.
+The full system block diagram shows how the HPS, command reader, command executer, FIFOs, rasterizer, frame buffer, and VGA controller connect.
 
-```md
-![System block diagram](docs/images/system-block-diagram.png)
-```
-
-![System block diagram](docs/images/system-block-diagram.png)
+![System block diagram](images/system-block-diagram.png)
 
 ---
 
@@ -240,13 +197,9 @@ The HPS sends graphics commands to the FPGA using shared SDRAM and lightweight b
 
 ### Command Flow Diagram
 
-Put a command-flow diagram here if you have one. This is a good place to show how a C function call turns into an FPGA operation.
+This diagram shows how a C function call becomes a hardware draw operation.
 
-```md
-![HPS to FPGA command flow](docs/images/command-flow-diagram.png)
-```
-
-![HPS to FPGA command flow](docs/images/command-flow-diagram.png)
+![HPS to FPGA command flow](images/command-flow-diagram.png)
 
 ---
 
@@ -302,25 +255,16 @@ It is made of four main pieces:
 
 ### Command Reader Diagram
 
-```md
-![Command reader block diagram]<img width="722" height="496" alt="image" src="https://github.com/user-attachments/assets/8d5db45f-582b-4aa3-8f91-a07e3e6b070c" />
-
-
-```
+![Command reader block diagram](images/command-reader-diagram.png)
 
 ### Command Executer Diagram
 
-```md
-![Command executer block diagram]<img width="754" height="368" alt="image" src="https://github.com/user-attachments/assets/157c6981-e6e3-41a7-9b94-bec88192e5ee" />
-
-```
+![Command executer block diagram](images/command-executer-diagram.png)
 
 ### FIFO Diagram
 
-```md
-![FIFO block diagram]<img width="578" height="286" alt="image" src="https://github.com/user-attachments/assets/f6e72aa0-2995-4127-a166-9245584e5e62" />
+![FIFO block diagram](images/fifo-diagram.png)
 
-```
 ---
 
 ## Rasterizer
@@ -334,10 +278,7 @@ It supports two draw paths:
 
 ### Rasterizer Block Diagram
 
-```md
-![Rasterizer block diagram]<img width="688" height="381" alt="image" src="https://github.com/user-attachments/assets/c5f3f95c-d578-4428-84ab-b15447c3375a" />
-
-```
+![Rasterizer block diagram](images/rasterizer-diagram.png)
 
 ### Triangle Rasterization
 
@@ -373,10 +314,8 @@ When `present_frame()` is called, the system requests a buffer swap. The swap is
 
 ### Frame Buffer Block Diagram
 
-```md
-![Frame buffer block diagram]<img width="685" height="490" alt="image" src="https://github.com/user-attachments/assets/9c4eecf0-2cdc-43a7-b510-08457864a348" />
+![Frame buffer block diagram](images/frame-buffer-diagram.png)
 
-```
 ---
 
 ## VGA Output
@@ -387,35 +326,11 @@ The project uses 640x480 VGA timing at 60 Hz, while the internal graphics resolu
 
 ### VGA Timing Diagram
 
-```md
-![VGA timing diagram]<img width="545" height="378" alt="image" src="https://github.com/user-attachments/assets/3e47f5e7-1c36-4896-b664-128239543845" />
-
-```
+![VGA timing diagram](images/vga-timing-diagram.png)
 
 ### VGA Wiring or Resistor Divider Diagram
 
-```md
-![VGA resistor divider circuit]<img width="474" height="499" alt="image" src="https://github.com/user-attachments/assets/fa8cd064-35ee-49c6-adf8-f4d1a76d44bb" />
-
-```
----
-
-## Hardware Setup
-
-Put a photo of the physical project setup here. This is useful for showing the board, wiring, VGA connector, and monitor.
-
-```md
-![Hardware setup](docs/images/hardware-setup.png)
-```
-
-![Hardware setup](docs/images/hardware-setup.png)
-
-Recommended photo contents:
-
-- Atlas / DE0-Nano-SoC board
-- VGA wiring or output connector
-- Monitor displaying one of the demos
-- Any keyboard, buttons, or serial connection used to control the demo
+![VGA resistor divider circuit](images/vga-resistor-divider.png)
 
 ---
 
@@ -452,34 +367,30 @@ Suggested repository structure:
 │   ├── config.h
 │   └── Makefile
 │
-└── docs/
-    └── images/
-        ├── demo-thumbnail.png
-        ├── demo-1-command-set.png
-        ├── demo-2-spinning-cube.png
-        ├── demo-3-dvd-logo.png
-        ├── demo-4-game-of-life.png
-        ├── demo-5-moving-triangles.png
-        ├── system-block-diagram.png
-        ├── command-flow-diagram.png
-        ├── command-reader-diagram.png
-        ├── command-executer-diagram.png
-        ├── fifo-diagram.png
-        ├── rasterizer-diagram.png
-        ├── frame-buffer-diagram.png
-        ├── double-buffering-diagram.png
-        ├── vga-timing-diagram.png
-        ├── vga-resistor-divider.png
-        └── hardware-setup.png
+└── images/
+    ├── demo-1-command-set.png
+    ├── demo-2-spinning-cube.png
+    ├── demo-3-dvd-logo.png
+    ├── demo-4-game-of-life.png
+    ├── demo-5-moving-triangles.png
+    ├── system-block-diagram.png
+    ├── command-flow-diagram.png
+    ├── command-reader-diagram.png
+    ├── command-executer-diagram.png
+    ├── fifo-diagram.png
+    ├── rasterizer-diagram.png
+    ├── frame-buffer-diagram.png
+    ├── vga-timing-diagram.png
+    └── vga-resistor-divider.png
 ```
 
 You do not need every image listed above. The strongest ones to include are:
 
-1. Demo video thumbnail
-2. Main system block diagram
-3. Rasterizer diagram
-4. Frame buffer diagram
-5. Demo output photos
+1. Main system block diagram
+2. Rasterizer diagram
+3. Frame buffer diagram
+4. Demo output photos
+5. VGA output or resistor divider diagram
 
 ---
 
