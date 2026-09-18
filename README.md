@@ -328,56 +328,6 @@ The project uses 640x480 VGA timing at 60 Hz, while the internal graphics resolu
 
 ---
 
-## Repository Layout
-
-Suggested repository structure:
-
-```text
-.
-├── README.md
-├── hardware/
-│   ├── graphics_system_top.sv
-│   ├── command_reader.sv
-│   ├── command_executer.sv
-│   ├── fifo.sv
-│   ├── rasterizer.sv
-│   ├── frame_buffer.sv
-│   ├── vga_timing.sv
-│   └── graphics_system.tcl
-│
-├── software/
-│   ├── comm.c
-│   ├── comm.h
-│   └── sprites.h
-│
-├── demos/
-│   ├── main.c
-│   ├── demos.c
-│   ├── demos.h
-│   ├── benchmarks.c
-│   ├── benchmarks.h
-│   ├── input.c
-│   ├── input.h
-│   ├── config.h
-│   └── Makefile
-│
-└── images/
-    ├── demo-1-command-set.png
-    ├── demo-2-spinning-cube.png
-    ├── demo-3-dvd-logo.png
-    ├── demo-4-game-of-life.png
-    ├── demo-5-moving-triangles.png
-    ├── system-block-diagram.png
-    ├── command-reader-diagram.png
-    ├── command-executer-diagram.png
-    ├── fifo-diagram.png
-    ├── rasterizer-diagram.png
-    ├── frame-buffer-diagram.png
-    ├── vga-timing-diagram.png
-    └── vga-resistor-divider.png
-```
----
-
 ## Building the Hardware
 
 The hardware system was built using Intel / Altera FPGA tools for the Cyclone V SoC platform.
